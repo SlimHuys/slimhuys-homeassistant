@@ -195,7 +195,7 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
 
         self._record_fields(payload)
         new_data = dict(self.data or {})
-        new_data[stream_key] = payload
+        new_data[stream_key] = {**(new_data.get(stream_key) or {}), **payload}
         self.async_set_updated_data(new_data)
 
     def _record_fields(self, payload: dict[str, Any]) -> None:

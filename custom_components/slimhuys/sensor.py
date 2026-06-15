@@ -125,8 +125,7 @@ def _build_live_entities(
         out.append(LivePowerPhaseSensor(coordinator, entry, supplier, "l2"))
     if _has("active_power_l3_w"):
         out.append(LivePowerPhaseSensor(coordinator, entry, supplier, "l3"))
-    if _has("gas_total_m3"):
-        out.append(LiveGasTotalSensor(coordinator, entry, supplier))
+    out.append(LiveGasTotalSensor(coordinator, entry, supplier))
     out.append(LiveWaterTotalSensor(coordinator, entry, supplier))
     return out
 

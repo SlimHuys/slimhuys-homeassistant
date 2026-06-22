@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
-Home Assistant integratie voor [SlimHuys.nl](https://slimhuys.nl) — dynamische
+Home Assistant-integratie voor [SlimHuys.nl](https://slimhuys.nl) — dynamische
 stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 
 ## Wat krijg je?
@@ -26,7 +26,7 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 
 ### Prijsarrays voor dashboards
 
-`prijzen_vandaag` en `prijzen_morgen` exposen de hele dag als attributen — compatibel met ApexCharts-Card, Energy Tariff Card en andere community-cards die de Nordpool/ENTSO-e-conventie volgen:
+`prijzen_vandaag` en `prijzen_morgen` stellen de hele dag als attributen beschikbaar — compatibel met ApexCharts-Card, Energy Tariff Card en andere community-cards die de Nordpool/ENTSO-e-conventie volgen:
 
 ```yaml
 attributes:
@@ -41,7 +41,7 @@ attributes:
   max: 0.46
 ```
 
-`prijzen_morgen` is `unknown` tot EPEX day-ahead publiceert (~14:00 CET) — attribuut `valid: true` zodra alle 24 uren binnen zijn. `prijzen_vandaag_kwartier` levert de native granulariteit van de API (15-min op de meeste leveranciers, 60-min als fallback) — `granularity_minutes` attribuut geeft aan welke.
+`prijzen_morgen` is `unknown` tot EPEX day-ahead publiceert (~14:00 CET) — attribuut `valid: true` zodra alle 24 uur beschikbaar zijn. `prijzen_vandaag_kwartier` levert de native granulariteit van de API (15-min op de meeste leveranciers, 60-min als fallback) — `granularity_minutes` attribuut geeft aan welke.
 
 Plus **één service** voor terug-push naar SlimHuys:
 
@@ -61,7 +61,7 @@ data:
 2. URL: `https://github.com/SlimHuys/slimhuys-homeassistant`
 3. Categorie: **Integration**
 4. **Add** → zoek "SlimHuys" → **Download**
-5. Restart Home Assistant
+5. Herstart Home Assistant
 6. **Settings → Devices & Services → + Add Integration → SlimHuys**
 7. Plak je API-key — die maak je aan op [slimhuys.nl/app/account?tab=api](https://slimhuys.nl/app/account?tab=api)
 
@@ -80,9 +80,9 @@ Tijdens **Add Integration** kies je in stap 3 één van drie P1-modi:
 | **push** | HA → SlimHuys | Je hebt een DSMR-meter via USB / HomeWizard / Tibber Pulse en wilt die data delen met SlimHuys |
 | **pull** | SlimHuys → HA | Je hebt een SlimHuys-P1-bridge die rechtstreeks aan SlimHuys is gekoppeld |
 
-De wizard kiest een sane default op basis van je SlimHuys-account
-(`has_p1_meter`-veld uit `/v1/me`): is er al een P1-bridge gepaird, dan
-default'ed pull, anders push.
+De wizard kiest een verstandige standaard op basis van je SlimHuys-account
+(`has_p1_meter`-veld uit `/v1/me`): is er al een P1-bridge gekoppeld, dan
+wordt pull als standaard geselecteerd, anders push.
 
 ### Push-modus — DSMR-data naar SlimHuys
 
@@ -95,12 +95,12 @@ en biedt dropdowns aan:
 
 Plus een push-interval (1–300 seconden, default 30s). Sinds v0.3.0 is de
 push **event-driven**: zodra je DSMR-meter een nieuwe waarde publiceert
-gaat 'ie meteen naar SlimHuys (met throttling op de configured interval).
+gaat 'ie meteen naar SlimHuys (met throttling op het ingestelde interval).
 
 **Optionele velden** (3-fase + gas) verschijnen automatisch onderin de
 wizard als ze in je HA-instance bestaan.
 
-> **1-seconde push** is sinds v0.2.0 mogelijk. DSMR-meters publiceren naturally
+> **1-seconde push** is sinds v0.2.0 mogelijk. DSMR-meters publiceren van nature
 > elke ~1s; de SlimHuys-API rate-limit is 600/min/key (= 10/s) dus 1Hz uit één
 > instance is comfortabel.
 

@@ -647,8 +647,7 @@ class LiveVoltageSensor(_LiveBaseSensor):
             self._PHASE_SUFFIX[phase], self._PHASE_NAMES[phase],
         )
         self._field = f"voltage_{phase}"
-        if phase in ("l2", "l3"):
-            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> float | None:
@@ -674,8 +673,7 @@ class LiveCurrentSensor(_LiveBaseSensor):
             self._PHASE_SUFFIX[phase], self._PHASE_NAMES[phase],
         )
         self._field = f"current_{phase}_a"
-        if phase in ("l2", "l3"):
-            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> float | None:
@@ -702,6 +700,7 @@ class LivePowerPhaseSensor(_LiveBaseSensor):
             self._PHASE_SUFFIX[phase], self._PHASE_NAMES[phase],
         )
         self._field = f"active_power_{phase}_w"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> int | None:

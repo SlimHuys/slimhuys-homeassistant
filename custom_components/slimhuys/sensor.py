@@ -13,10 +13,12 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CURRENCY_EURO,
+    PERCENTAGE,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
+    UnitOfTemperature,
     UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant
@@ -34,9 +36,11 @@ from .const import (
     LIVE_SUFFIX_CURRENT_L3,
     LIVE_SUFFIX_DELIVERY_TOTAL,
     LIVE_SUFFIX_GAS_TOTAL,
+    LIVE_SUFFIX_HUMIDITY,
     LIVE_SUFFIX_POWER_L1,
     LIVE_SUFFIX_POWER_L2,
     LIVE_SUFFIX_POWER_L3,
+    LIVE_SUFFIX_TEMPERATURE,
     LIVE_SUFFIX_VOLTAGE_L1,
     LIVE_SUFFIX_VOLTAGE_L2,
     LIVE_SUFFIX_VOLTAGE_L3,
@@ -127,6 +131,10 @@ def _build_live_entities(
         out.append(LivePowerPhaseSensor(coordinator, entry, supplier, "l3"))
     out.append(LiveGasTotalSensor(coordinator, entry, supplier))
     out.append(LiveWaterTotalSensor(coordinator, entry, supplier))
+    if _has("temp_c"):
+        out.append(LiveTemperatureSensor(coordinator, entry, supplier))
+    if _has("humid_pct"):
+        out.append(LiveHumiditySensor(coordinator, entry, supplier))
     return out
 
 
@@ -731,6 +739,40 @@ class LiveWaterTotalSensor(_LiveBaseSensor):
 
     def __init__(self, coordinator, entry, supplier):
         super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_WATER_TOTAL, "Water totaal")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
+class LiveTemperatureSensor(_LiveBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:thermometer"
+    _field = "temp_c"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_TEMPERATURE, "Temperatuur")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
+class LiveHumiditySensor(_LiveBaseSensor):
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:water-percent"
+    _field = "humid_pct"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_HUMIDITY, "Luchtvochtigheid")
 
     @property
     def native_value(self) -> float | None:

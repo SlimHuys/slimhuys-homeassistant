@@ -82,6 +82,8 @@ LIVE_SUFFIX_POWER_L2 = "live_power_l2"
 LIVE_SUFFIX_POWER_L3 = "live_power_l3"
 LIVE_SUFFIX_GAS_TOTAL = "live_gas_total"
 LIVE_SUFFIX_WATER_TOTAL = "live_water_total"
+LIVE_SUFFIX_TEMPERATURE = "live_temperature"
+LIVE_SUFFIX_HUMIDITY = "live_humidity"
 
 # Service names
 SERVICE_PUSH_READING = "push_reading"

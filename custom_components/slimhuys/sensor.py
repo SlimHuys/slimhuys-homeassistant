@@ -20,6 +20,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfTemperature,
     UnitOfVolume,
+    UnitOfVolumeFlowRate,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -37,6 +38,9 @@ from .const import (
     LIVE_SUFFIX_DELIVERY_TOTAL,
     LIVE_SUFFIX_GAS_TOTAL,
     LIVE_SUFFIX_HUMIDITY,
+    LIVE_SUFFIX_LONG_POWER_FAILURES,
+    LIVE_SUFFIX_POWER_FAILURES,
+    LIVE_SUFFIX_WATER_FLOW,
     LIVE_SUFFIX_POWER_L1,
     LIVE_SUFFIX_POWER_L2,
     LIVE_SUFFIX_POWER_L3,
@@ -44,6 +48,12 @@ from .const import (
     LIVE_SUFFIX_VOLTAGE_L1,
     LIVE_SUFFIX_VOLTAGE_L2,
     LIVE_SUFFIX_VOLTAGE_L3,
+    LIVE_SUFFIX_VOLTAGE_SAGS_L1,
+    LIVE_SUFFIX_VOLTAGE_SAGS_L2,
+    LIVE_SUFFIX_VOLTAGE_SAGS_L3,
+    LIVE_SUFFIX_VOLTAGE_SWELLS_L1,
+    LIVE_SUFFIX_VOLTAGE_SWELLS_L2,
+    LIVE_SUFFIX_VOLTAGE_SWELLS_L3,
     LIVE_SUFFIX_WATER_TOTAL,
     P1_MODE_PULL,
 )
@@ -131,6 +141,24 @@ def _build_live_entities(
         out.append(LivePowerPhaseSensor(coordinator, entry, supplier, "l3"))
     out.append(LiveGasTotalSensor(coordinator, entry, supplier))
     out.append(LiveWaterTotalSensor(coordinator, entry, supplier))
+    if _has("flow_lpm"):
+        out.append(LiveWaterFlowSensor(coordinator, entry, supplier))
+    if _has("power_failures"):
+        out.append(LivePowerFailuresSensor(coordinator, entry, supplier))
+    if _has("long_power_failures"):
+        out.append(LiveLongPowerFailuresSensor(coordinator, entry, supplier))
+    if _has("voltage_sags_l1"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "sags", "l1"))
+    if _has("voltage_sags_l2"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "sags", "l2"))
+    if _has("voltage_sags_l3"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "sags", "l3"))
+    if _has("voltage_swells_l1"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "swells", "l1"))
+    if _has("voltage_swells_l2"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "swells", "l2"))
+    if _has("voltage_swells_l3"):
+        out.append(LiveVoltageSagsSwellsSensor(coordinator, entry, supplier, "swells", "l3"))
     if _has("temp_c"):
         out.append(LiveTemperatureSensor(coordinator, entry, supplier))
     if _has("humid_pct"):
@@ -745,6 +773,24 @@ class LiveWaterTotalSensor(_LiveBaseSensor):
         return float(v) if v is not None else None
 
 
+class LiveWaterFlowSensor(_LiveBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfVolumeFlowRate.LITERS_PER_MINUTE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.VOLUME_FLOW_RATE
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:water-flow"
+    _stream = "water"
+    _field = "flow_lpm"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_WATER_FLOW, "Waterdebiet")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
 class LiveTemperatureSensor(_LiveBaseSensor):
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -777,3 +823,66 @@ class LiveHumiditySensor(_LiveBaseSensor):
     def native_value(self) -> float | None:
         v = self._read()
         return float(v) if v is not None else None
+
+
+class LivePowerFailuresSensor(_LiveBaseSensor):
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:power-plug-off"
+    _field = "power_failures"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_POWER_FAILURES, "Stroomuitvallen")
+
+    @property
+    def native_value(self) -> int | None:
+        v = self._read()
+        return int(v) if v is not None else None
+
+
+class LiveLongPowerFailuresSensor(_LiveBaseSensor):
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:power-plug-off-outline"
+    _field = "long_power_failures"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_LONG_POWER_FAILURES, "Lange stroomuitvallen")
+
+    @property
+    def native_value(self) -> int | None:
+        v = self._read()
+        return int(v) if v is not None else None
+
+
+class LiveVoltageSagsSwellsSensor(_LiveBaseSensor):
+    """Spanningsdips (sags) of -pieken (swells) per fase — cumulatieve tellers."""
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    _SUFFIX = {
+        ("sags", "l1"): LIVE_SUFFIX_VOLTAGE_SAGS_L1,
+        ("sags", "l2"): LIVE_SUFFIX_VOLTAGE_SAGS_L2,
+        ("sags", "l3"): LIVE_SUFFIX_VOLTAGE_SAGS_L3,
+        ("swells", "l1"): LIVE_SUFFIX_VOLTAGE_SWELLS_L1,
+        ("swells", "l2"): LIVE_SUFFIX_VOLTAGE_SWELLS_L2,
+        ("swells", "l3"): LIVE_SUFFIX_VOLTAGE_SWELLS_L3,
+    }
+    _NL = {"sags": "Spanningsdips", "swells": "Spanningspieken"}
+    _ICON = {"sags": "mdi:sine-wave", "swells": "mdi:sine-wave"}
+
+    def __init__(self, coordinator, entry, supplier, kind: str, phase: str):
+        phase_up = phase.upper()
+        super().__init__(
+            coordinator, entry, supplier,
+            self._SUFFIX[(kind, phase)],
+            f"{self._NL[kind]} {phase_up}",
+        )
+        self._field = f"voltage_{kind}_{phase}"
+        self._attr_icon = self._ICON[kind]
+
+    @property
+    def native_value(self) -> int | None:
+        v = self._read()
+        return int(v) if v is not None else None

@@ -777,7 +777,7 @@ class LiveWaterFlowSensor(_LiveBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_device_class = SensorDeviceClass.VOLUME_FLOW_RATE
     _attr_suggested_display_precision = 1
-    _attr_icon = "mdi:water-flow"
+    _attr_icon = "mdi:gauge"
     _stream = "water"
     _field = "flow_lpm"
 

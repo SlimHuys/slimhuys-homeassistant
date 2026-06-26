@@ -83,6 +83,7 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
         live = (snapshot or {}).get("live") or {}
         water = (snapshot or {}).get("water") or {}
         self._record_fields(live)
+        self._record_fields(water)
         self.data = {}
         if live:
             self.data["p1"] = live

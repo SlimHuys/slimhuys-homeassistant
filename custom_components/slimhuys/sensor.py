@@ -141,8 +141,7 @@ def _build_live_entities(
         out.append(LivePowerPhaseSensor(coordinator, entry, supplier, "l3"))
     out.append(LiveGasTotalSensor(coordinator, entry, supplier))
     out.append(LiveWaterTotalSensor(coordinator, entry, supplier))
-    if _has("flow_lpm"):
-        out.append(LiveWaterFlowSensor(coordinator, entry, supplier))
+    out.append(LiveWaterFlowSensor(coordinator, entry, supplier))
     if _has("power_failures"):
         out.append(LivePowerFailuresSensor(coordinator, entry, supplier))
     if _has("long_power_failures"):

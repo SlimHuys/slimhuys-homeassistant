@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -371,12 +371,18 @@ class CurrentLevelSensor(_BaseSensor):
 # ---------- Today/tomorrow price arrays (dashboard-friendly) ----------
 
 
+def _nl_now() -> datetime:
+    """Huidige tijd in Europe/Amsterdam — DST-correct."""
+    from zoneinfo import ZoneInfo  # Python 3.9+, altijd beschikbaar in HA
+    return datetime.now(ZoneInfo("Europe/Amsterdam"))
+
+
 def _today_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return _nl_now().strftime("%Y-%m-%d")
 
 
 def _tomorrow_str() -> str:
-    return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    return (_nl_now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def _end_iso(start_iso: str, minutes: int) -> str | None:
@@ -509,13 +515,15 @@ class PricesTodayQuarterSensor(_BaseSensor):
             return None
         gran = _granularity_minutes(points)
         today = _today_str()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         for p in points:
             ts = p.get("timestamp", "")
             if not ts.startswith(today):
                 continue
             try:
-                slot_start = datetime.fromisoformat(ts).replace(tzinfo=None)
+                slot_start = datetime.fromisoformat(ts)
+                if slot_start.tzinfo is None:
+                    slot_start = slot_start.replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
             if slot_start <= now < slot_start + timedelta(minutes=gran):

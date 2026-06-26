@@ -131,10 +131,13 @@ Aangemaakte sensors:
 | `sensor.vermogen_l1/l2/l3` | W (signed) | power |
 | `sensor.gas_totaal` | m³ (total_increasing) | gas |
 | `sensor.water_totaal` | L native, m³ display (total_increasing) | water |
+| `sensor.temperatuur` | °C | temperature |
+| `sensor.luchtvochtigheid` | % | humidity |
 
 3-fase entities worden alleen aangemaakt voor fasen die de meter rapporteert
 (via een eenmalige `/current`-probe bij setup). 1-fase huishoudens krijgen
-geen permanent-unavailable L2/L3-entities.
+geen permanent-unavailable L2/L3-entities. Temperatuur en luchtvochtigheid
+verschijnen alleen als de gekoppelde meter die velden stuurt.
 
 ## Configuratie wijzigen
 

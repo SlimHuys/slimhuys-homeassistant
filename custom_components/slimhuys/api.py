@@ -78,24 +78,29 @@ class SlimHuysClient:
 
     # ----- Public endpoints (no auth) -----
 
-    async def current_price(self, supplier: str) -> dict[str, Any]:
-        return await self._request(
-            "GET",
-            "/v1/prices/current",
-            params={"supplier": supplier},
-        )
+    async def current_price(
+        self, supplier: str, direction: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"supplier": supplier}
+        if direction:
+            params["direction"] = direction
+        return await self._request("GET", "/v1/prices/current", params=params)
 
     async def price_range(
         self,
         supplier: str,
         from_iso: str,
         to_iso: str,
+        direction: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "GET",
-            "/v1/prices/range",
-            params={"supplier": supplier, "from": from_iso, "to": to_iso},
-        )
+        params: dict[str, str] = {
+            "supplier": supplier,
+            "from": from_iso,
+            "to": to_iso,
+        }
+        if direction:
+            params["direction"] = direction
+        return await self._request("GET", "/v1/prices/range", params=params)
 
     async def suppliers(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/v1/suppliers")

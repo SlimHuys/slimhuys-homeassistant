@@ -55,7 +55,7 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
         # Negatieve uren — eerstvolgende
         negative = self._find_next_negative(hourly)
 
-        return {
+        data = {
             "current": current,
             "hourly": hourly,
             "points": points,
@@ -65,21 +65,98 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
             "fetched_at": datetime.now().isoformat(),
         }
 
+        # Teruglevering — mag falen zonder de consume-sensoren te breken.
+        data.update(
+            await self._fetch_feedin(
+                today_start.strftime("%Y-%m-%dT%H:%M:%S"),
+                tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S"),
+            )
+        )
+        return data
+
+    async def _fetch_feedin(self, from_iso: str, to_iso: str) -> dict[str, Any]:
+        """Haal teruglever-rates op. Fail-safe: bij fout of oude API → leeg.
+
+        De prijs-endpoints negeren `direction` zolang de API-deploy nog niet
+        live is en geven dan de consume-`breakdown` terug. We herkennen echte
+        feedin-data aan de aanwezigheid van de `feedin`-key en vallen anders
+        stil terug op "geen teruglevering" — zo is deze release veilig te
+        shippen vóór de backend-deploy.
+        """
+        empty = {
+            "feedin_current": None,
+            "feedin_points": [],
+            "feedin_hourly": [],
+            "feedin_model": None,
+        }
+        try:
+            current = await self._client.current_price(
+                self._supplier, direction="feedin"
+            )
+            range_resp = await self._client.price_range(
+                self._supplier, from_iso, to_iso, direction="feedin"
+            )
+        except SlimHuysApiError as err:
+            _LOGGER.debug("teruglevering ophalen mislukt: %s", err)
+            return empty
+
+        points = (range_resp or {}).get("points", []) or []
+        if not (points and "feedin" in points[0]):
+            # Oude API (nog geen direction-support) → geen feedin-data
+            return empty
+
+        now = (current or {}).get("now") or {}
+        return {
+            "feedin_current": current if "feedin" in now else None,
+            "feedin_points": points,
+            "feedin_hourly": self._aggregate_feedin_hourly(points),
+            "feedin_model": (range_resp or {}).get("feedin_model"),
+        }
+
     @staticmethod
     def _aggregate_hourly(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Aggregate consume-points (`breakdown`) to 24+24 hour-buckets."""
+        return SlimHuysCoordinator._aggregate(
+            points,
+            lambda p: (p.get("breakdown") or {}).get("total_eur_per_kwh"),
+            lambda p: (p.get("breakdown") or {}).get("epex_eur_per_kwh"),
+        )
+
+    @staticmethod
+    def _aggregate_feedin_hourly(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Aggregate feedin-points (`feedin`) to 24+24 hour-buckets.
+
+        Zelfde bucket-vorm als consume (`price`/`epex`/`start_ts`) zodat de
+        sensor-helpers ongewijzigd werken; `price` is hier de teruglever-rate.
+        """
+        return SlimHuysCoordinator._aggregate(
+            points,
+            lambda p: (p.get("feedin") or {}).get("feedin_eur_per_kwh"),
+            lambda p: (p.get("feedin") or {}).get("epex_eur_per_kwh"),
+        )
+
+    @staticmethod
+    def _aggregate(
+        points: list[dict[str, Any]],
+        get_price: Any,
+        get_epex: Any,
+    ) -> list[dict[str, Any]]:
         """Aggregate 15-min or 60-min points to 24+24 hour-buckets (today + tomorrow)."""
         buckets: dict[str, dict[int, dict[str, Any]]] = {}
         for p in points:
             ts = p.get("timestamp", "")
             if len(ts) < 13:
                 continue
+            price = get_price(p)
+            if price is None:
+                continue
             day = ts[:10]
             hour = int(ts[11:13])
             bucket = buckets.setdefault(day, {}).setdefault(
                 hour, {"prices": [], "epex": [], "start_ts": ts}
             )
-            bucket["prices"].append(p["breakdown"]["total_eur_per_kwh"])
-            epex = p["breakdown"].get("epex_eur_per_kwh")
+            bucket["prices"].append(price)
+            epex = get_epex(p)
             if epex is not None:
                 bucket["epex"].append(epex)
 

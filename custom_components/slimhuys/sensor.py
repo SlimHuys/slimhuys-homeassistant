@@ -89,6 +89,9 @@ async def async_setup_entry(
         PricesTodaySensor(coordinator, entry, supplier),
         PricesTomorrowSensor(coordinator, entry, supplier),
         PricesTodayQuarterSensor(coordinator, entry, supplier),
+        FeedinCurrentSensor(coordinator, entry, supplier),
+        FeedinTodaySensor(coordinator, entry, supplier),
+        FeedinTomorrowSensor(coordinator, entry, supplier),
     ]
 
     if mode == P1_MODE_PULL and live_coordinator is not None:
@@ -559,6 +562,156 @@ class PricesTodayQuarterSensor(_BaseSensor):
             "max": max(prices),
             "supplier": self._supplier,
         }
+
+
+# ---------- Teruglevering (feedin) ----------
+
+
+def _feedin_model_attrs(model: dict[str, Any] | None) -> dict[str, Any]:
+    """Teruglever-model als losse attributen — voor tegels/uitleg op dashboard.
+
+    De jaar-cap/saldering zit bewust NIET in de rate (household-jaar-state);
+    we echoën 'm hier zodat je 'm als informatie kunt tonen.
+    """
+    if not model:
+        return {}
+    return {
+        "feedin_strategy": model.get("strategy"),
+        "feedin_description": model.get("description"),
+        "feedin_markup_eur_per_kwh": model.get("feedin_markup_eur_per_kwh"),
+        "feedin_bonus_pct": model.get("feedin_bonus_pct"),
+        "feedin_bonus_daytime_only": model.get("feedin_bonus_daytime_only"),
+        "feedin_bonus_annual_cap_kwh": model.get("feedin_bonus_annual_cap_kwh"),
+    }
+
+
+class FeedinCurrentSensor(_BaseSensor):
+    """Huidige terugleververgoeding (incl. btw)."""
+
+    _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 4
+    _attr_icon = "mdi:transmission-tower-export"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, "feedin_current", "Teruglevering nu")
+
+    @property
+    def native_value(self) -> float | None:
+        fc = (self.coordinator.data or {}).get("feedin_current")
+        if not fc:
+            return None
+        return ((fc.get("now") or {}).get("feedin") or {}).get("feedin_eur_per_kwh")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        data = self.coordinator.data or {}
+        fc = data.get("feedin_current")
+        if not fc:
+            return None
+        now = fc.get("now") or {}
+        fd = now.get("feedin") or {}
+        comp = fc.get("comparison") or {}
+        attrs = {
+            "epex_eur_per_kwh": fd.get("epex_eur_per_kwh"),
+            "level": now.get("level"),
+            "valid_from": now.get("timestamp"),
+            "valid_until": now.get("valid_until"),
+            "day_avg_eur": comp.get("day_avg_eur"),
+            "vs_day_avg_pct": comp.get("vs_day_avg_pct"),
+            "supplier": self._supplier,
+        }
+        attrs.update(_feedin_model_attrs(data.get("feedin_model")))
+        return attrs
+
+
+class FeedinTodaySensor(_BaseSensor):
+    """Teruglevering vandaag — state = huidige rate, attrs = array + raw_today."""
+
+    _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 4
+    _attr_icon = "mdi:solar-power-variant"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, "feedin_today", "Teruglevering vandaag")
+
+    @property
+    def native_value(self) -> float | None:
+        fc = (self.coordinator.data or {}).get("feedin_current")
+        if not fc:
+            return None
+        return ((fc.get("now") or {}).get("feedin") or {}).get("feedin_eur_per_kwh")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        data = self.coordinator.data or {}
+        hourly = data.get("feedin_hourly", [])
+        today = _today_str()
+        prices = [
+            h["price"] for h in hourly if h["day"] == today and h["price"] is not None
+        ]
+        if not prices:
+            return None
+        attrs = {
+            "prices": prices,
+            "raw_today": _build_hourly_raw(hourly, today),
+            "raw_today_epex": _build_hourly_raw(hourly, today, field="epex"),
+            "average": sum(prices) / len(prices),
+            "min": min(prices),
+            "max": max(prices),
+            "supplier": self._supplier,
+        }
+        attrs.update(_feedin_model_attrs(data.get("feedin_model")))
+        return attrs
+
+
+class FeedinTomorrowSensor(_BaseSensor):
+    """Teruglevering morgen — state = daggemiddelde, None vóór EPEX-publicatie."""
+
+    _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 4
+    _attr_icon = "mdi:solar-power-variant"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, "feedin_tomorrow", "Teruglevering morgen")
+
+    @property
+    def native_value(self) -> float | None:
+        hourly = (self.coordinator.data or {}).get("feedin_hourly", [])
+        tomorrow = _tomorrow_str()
+        prices = [
+            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
+        ]
+        if not prices:
+            return None
+        return sum(prices) / len(prices)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        data = self.coordinator.data or {}
+        hourly = data.get("feedin_hourly", [])
+        tomorrow = _tomorrow_str()
+        prices = [
+            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
+        ]
+        # `valid: false` vóór ENTSO-E-publicatie — geen `unavailable`
+        valid = len(prices) >= 24
+        attrs = {
+            "valid": valid,
+            "prices": prices,
+            "raw_tomorrow": _build_hourly_raw(hourly, tomorrow),
+            "raw_tomorrow_epex": _build_hourly_raw(hourly, tomorrow, field="epex"),
+            "average": (sum(prices) / len(prices)) if prices else None,
+            "min": min(prices) if prices else None,
+            "max": max(prices) if prices else None,
+            "supplier": self._supplier,
+        }
+        attrs.update(_feedin_model_attrs(data.get("feedin_model")))
+        return attrs
 
 
 # ---------- Live (pull-mode) entities ----------

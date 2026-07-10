@@ -145,6 +145,22 @@ luchtvochtigheid verschijnen alleen als de gekoppelde meter die velden stuurt.
 Settings → Devices & Services → SlimHuys → **Configure** → wissel van leverancier
 (Tibber, Frank, Zonneplan, ANWB, Eneco, NextEnergy, Coolblue, easyEnergy, Powerpeers).
 
+## Meer over dynamische stroomprijzen
+
+Geen Home Assistant bij de hand? Dezelfde data staat live op SlimHuys.nl,
+doorgerekend met energiebelasting en btw:
+
+- [Dynamische stroomprijs vandaag](https://slimhuys.nl/stroomprijzen-vandaag) — per kwartier, NL-zone
+- [Stroomprijs morgen](https://slimhuys.nl/stroomprijzen-morgen) — de EPEX day-ahead-tarieven van morgen
+- [Gemiddelde stroomprijs per maand en jaar](https://slimhuys.nl/gemiddelde-stroomprijs)
+- [Negatieve stroomprijzen in Nederland](https://slimhuys.nl/negatieve-stroomprijzen)
+- [Dynamische energieleveranciers vergelijken](https://slimhuys.nl/vergelijken) — Tibber, Frank Energie, Zonneplan en meer
+- [Wanneer kan ik mijn auto het goedkoopst laden?](https://slimhuys.nl/wanneer-laden)
+
+De tarieven komen uit de open dataset
+[dynamic-tariffs-nl](https://github.com/SlimHuys/dynamic-tariffs-nl) en de
+publieke API op `https://slimhuys.nl/v1/suppliers`.
+
 ## Licentie
 
 MIT — zie [LICENSE](LICENSE).

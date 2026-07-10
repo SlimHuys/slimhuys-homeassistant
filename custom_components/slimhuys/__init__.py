@@ -56,7 +56,7 @@ from .live_coordinator import SlimHuysLiveCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 # Optionele velden voor de push_reading-service. Volledige spiegel van wat
 # /v1/me/readings accepteert; users kunnen via automation 1-op-1 doorzetten.

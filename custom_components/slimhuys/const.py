@@ -97,6 +97,11 @@ LIVE_SUFFIX_VOLTAGE_SWELLS_L3 = "live_voltage_swells_l3"
 # Service names
 SERVICE_PUSH_READING = "push_reading"
 
+# Drempel (kale EPEX, €/kWh) waaronder `binary_sensor.*_negatieve_prijs` aan gaat.
+# 0 = strikt negatief. Verlaag (bijv. -0.02) als je pas wilt curtailen wanneer
+# de EPEX ver genoeg onder nul zit om de terugleverkosten te dekken.
+NEGATIVE_PRICE_THRESHOLD = 0.0
+
 # Reasonable default supplier
 DEFAULT_SUPPLIER = "frank-energie"
 

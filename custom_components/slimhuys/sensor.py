@@ -39,6 +39,7 @@ from .const import (
     LIVE_SUFFIX_GAS_TOTAL,
     LIVE_SUFFIX_HUMIDITY,
     LIVE_SUFFIX_LONG_POWER_FAILURES,
+    LIVE_SUFFIX_NET_POWER,
     LIVE_SUFFIX_POWER_FAILURES,
     LIVE_SUFFIX_WATER_FLOW,
     LIVE_SUFFIX_POWER_L1,
@@ -121,6 +122,7 @@ def _build_live_entities(
     out: list[SensorEntity] = [
         LiveActivePowerSensor(coordinator, entry, supplier),
         LiveActivePowerReturnedSensor(coordinator, entry, supplier),
+        LiveNetPowerSensor(coordinator, entry, supplier),
         LiveConsumptionTotalSensor(coordinator, entry, supplier),
         LiveDeliveryTotalSensor(coordinator, entry, supplier),
     ]
@@ -780,6 +782,32 @@ class LiveActivePowerReturnedSensor(_LiveBaseSensor):
     def native_value(self) -> int | None:
         v = self._read()
         return int(v) if v is not None else None
+
+
+class LiveNetPowerSensor(_LiveBaseSensor):
+    """Netto vermogen — signed, zelfde conventie als de fase-sensoren.
+
+    De meter levert afname en teruglevering als twee losse, altijd-positieve
+    velden. `sensor.actief_vermogen` kan daardoor nooit negatief worden, ook
+    niet als je netto flink terugleeft — verwarrend naast `sensor.vermogen_l*`,
+    die wél signed zijn. Deze sensor telt ze samen: positief = van het net,
+    negatief = naar het net.
+    """
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_icon = "mdi:transmission-tower"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, LIVE_SUFFIX_NET_POWER, "Netto vermogen")
+
+    @property
+    def native_value(self) -> int | None:
+        drawn = self._read("active_power_w")
+        returned = self._read("active_power_returned_w")
+        if drawn is None and returned is None:
+            return None
+        return int(drawn or 0) - int(returned or 0)
 
 
 class LiveConsumptionTotalSensor(_LiveBaseSensor):

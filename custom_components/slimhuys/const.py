@@ -69,6 +69,7 @@ POLL_FALLBACK_INTERVAL = 5.0
 # Sensor unique-id-suffixes voor pull-mode entities (stabiel over restarts)
 LIVE_SUFFIX_ACTIVE_POWER = "live_active_power"
 LIVE_SUFFIX_ACTIVE_POWER_RETURNED = "live_active_power_returned"
+LIVE_SUFFIX_NET_POWER = "live_net_power"
 LIVE_SUFFIX_CONSUMPTION_TOTAL = "live_consumption_total"
 LIVE_SUFFIX_DELIVERY_TOTAL = "live_delivery_total"
 LIVE_SUFFIX_VOLTAGE_L1 = "live_voltage_l1"

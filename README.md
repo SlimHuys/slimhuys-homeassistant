@@ -131,8 +131,9 @@ Aangemaakte sensors:
 
 | Entity | Eenheid | Device-class |
 |---|---|---|
-| `sensor.actief_vermogen` | W | power |
-| `sensor.teruglevering_vermogen` | W | power |
+| `sensor.actief_vermogen` | W (afname, altijd ≥ 0) | power |
+| `sensor.teruglevering_vermogen` | W (export, altijd ≥ 0) | power |
+| `sensor.netto_vermogen` | W (signed: − = teruglevering) | power |
 | `sensor.verbruik_totaal` | kWh (total_increasing) | energy |
 | `sensor.teruglevering_totaal` | kWh (total_increasing) | energy |
 | `sensor.spanning_l1/l2/l3` | V | voltage (L2/L3 als diagnostic) |
@@ -143,6 +144,12 @@ Aangemaakte sensors:
 | `sensor.waterdebiet` | L/min (measurement) | water |
 | `sensor.temperatuur` | °C | temperature |
 | `sensor.luchtvochtigheid` | % | humidity |
+
+De meter levert afname en teruglevering als twee losse, altijd-positieve
+velden — `sensor.actief_vermogen` wordt dus nooit negatief, ook niet als je
+netto terugleeft. Wil je één getal met richting (zoals `sensor.vermogen_l*`),
+gebruik dan `sensor.netto_vermogen`: positief = van het net, negatief = naar
+het net.
 
 3-fase entities worden alleen aangemaakt voor fasen die de meter rapporteert
 (via een eenmalige `/current`-probe bij setup). 1-fase huishoudens krijgen
@@ -308,7 +315,7 @@ series:
 type: horizontal-stack
 cards:
   - type: tile
-    entity: sensor.actief_vermogen
+    entity: sensor.netto_vermogen
     name: Nu
   - type: tile
     entity: sensor.teruglevering_vermogen

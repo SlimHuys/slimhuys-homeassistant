@@ -7,7 +7,7 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 
 ## Wat krijg je?
 
-**Twaalf prijssensoren per leverancier:**
+**Vijftien prijssensoren per leverancier:**
 
 | Sensor | Eenheid | Voorbeeld |
 |---|---|---|
@@ -23,6 +23,15 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 | `sensor.prijzen_vandaag` | EUR/kWh + `prices[24]` attr | `0.158` |
 | `sensor.prijzen_morgen` | EUR/kWh + `prices[24]` attr | `0.187` of `unknown` |
 | `sensor.prijzen_vandaag_kwartier` | EUR/kWh + `prices[96]` attr | `0.155` |
+| `sensor.teruglevering_nu` | EUR/kWh | `0.071` |
+| `sensor.teruglevering_vandaag` | EUR/kWh + `raw_today` attr | `0.071` |
+| `sensor.teruglevering_morgen` | EUR/kWh + `raw_tomorrow` attr | `0.084` of `unknown` |
+
+> **Entity-id's bij jou**: de integratie gebruikt `has_entity_name`, dus HA
+> plakt de device-naam ervoor — `sensor.slimhuys_frank_energie_huidige_prijs`
+> in plaats van `sensor.huidige_prijs`. In deze README staat overal de korte
+> vorm; kijk je eigen id's na via **Developer tools → States** (filter op
+> `slimhuys`) of hernoem de entiteiten naar de korte vorm.
 
 ### Prijsarrays voor dashboards
 
@@ -139,6 +148,186 @@ Aangemaakte sensors:
 (via een eenmalige `/current`-probe bij setup). 1-fase huishoudens krijgen
 geen permanent-unavailable L2/L3-entities. Waterdebiet, temperatuur en
 luchtvochtigheid verschijnen alleen als de gekoppelde meter die velden stuurt.
+
+## Kant-en-klaar dashboard
+
+Geen zin om zelf met grafieken te puzzelen? Hieronder staat een compleet
+dashboard om te kopiëren. Plak het via **Overzicht → potlood → 3-puntjes →
+Raw configuration editor** (of per kaart via **+ Kaart toevoegen → Handmatig**).
+
+### Zonder extra downloads
+
+Werkt met alleen de standaard-kaarten van Home Assistant:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: heading
+    heading: Stroomprijs
+    heading_style: title
+
+  - type: glance
+    columns: 3
+    entities:
+      - entity: sensor.huidige_prijs
+        name: Nu
+      - entity: sensor.daggemiddelde
+        name: Gemiddeld
+      - entity: sensor.laagste_vandaag
+        name: Laagste
+
+  - type: history-graph
+    hours_to_show: 24
+    entities:
+      - entity: sensor.huidige_prijs
+        name: Prijsverloop
+
+  - type: markdown
+    content: >-
+      **Goedkoopste blok vandaag:**
+      {{ states('sensor.goedkoopste_blok_start') }} —
+      € {{ states('sensor.goedkoopste_blok_gemiddelde') | float(0) | round(3) }}/kWh
+
+
+      **Niveau nu:** {{ states('sensor.tariefniveau_nu') }}
+      {% if states('sensor.volgende_negatieve_prijs') not in ['geen', 'unknown'] %}
+
+
+      ⚡ **Negatieve prijs:** {{ states('sensor.volgende_negatieve_prijs') }}
+      {% endif %}
+```
+
+De `history-graph` tekent het *werkelijke* verloop van vandaag (HA's eigen
+recorder), dus morgen-prijzen zie je daar niet in. Wil je vandaag én morgen
+in één staafgrafiek, gebruik dan de ApexCharts-variant hieronder.
+
+### Met ApexCharts-card (vandaag + morgen in één grafiek)
+
+Installeer eenmalig **ApexCharts Card** via HACS → Frontend → zoek
+"apexcharts-card" → Download → herstart de browser (ctrl-shift-R).
+
+```yaml
+type: custom:apexcharts-card
+experimental:
+  color_threshold: true
+header:
+  show: true
+  title: Stroomprijs vandaag & morgen
+  show_states: true
+  colorize_states: true
+graph_span: 2d
+span:
+  start: day
+now:
+  show: true
+  label: nu
+yaxis:
+  - decimals: 2
+    apex_config:
+      title:
+        text: € / kWh
+series:
+  - entity: sensor.prijzen_vandaag
+    name: Vandaag
+    type: column
+    curve: stepline
+    unit: € /kWh
+    float_precision: 3
+    show:
+      extremas: true
+    color_threshold:
+      - value: -0.001
+        color: "#1b5e20"
+      - value: 0
+        color: "#2e7d32"
+      - value: 0.25
+        color: "#f9a825"
+      - value: 0.40
+        color: "#c62828"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p => {
+        return [new Date(p.start).getTime(), p.value];
+      });
+  - entity: sensor.prijzen_morgen
+    name: Morgen
+    type: column
+    curve: stepline
+    unit: € /kWh
+    float_precision: 3
+    opacity: 0.55
+    color_threshold:
+      - value: -0.001
+        color: "#1b5e20"
+      - value: 0
+        color: "#2e7d32"
+      - value: 0.25
+        color: "#f9a825"
+      - value: 0.40
+        color: "#c62828"
+    data_generator: |
+      return (entity.attributes.raw_tomorrow || []).map(p => {
+        return [new Date(p.start).getTime(), p.value];
+      });
+```
+
+De morgen-reeks is leeg tot EPEX day-ahead publiceert (~14:00 CET) — de
+grafiek toont dan simpelweg alleen vandaag, geen foutmelding.
+
+**Liever kwartier-precisie?** Vervang de eerste reeks door
+`sensor.prijzen_vandaag_kwartier` (zelfde `raw_today`-vorm, 96 punten) en
+zet `graph_span: 1d`.
+
+**Teruglevering erbij?** Voeg een derde reeks toe met
+`entity: sensor.teruglevering_vandaag` — die heeft exact dezelfde
+`raw_today`-structuur.
+
+### Kale EPEX naast de all-in prijs
+
+Handig om te zien hoeveel er aan belasting/btw/marge bovenop zit — beide
+attributen zitten op dezelfde sensor:
+
+```yaml
+series:
+  - entity: sensor.prijzen_vandaag
+    name: All-in
+    type: column
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p => [new Date(p.start).getTime(), p.value]);
+  - entity: sensor.prijzen_vandaag
+    name: Kale EPEX
+    type: line
+    curve: stepline
+    stroke_width: 2
+    data_generator: |
+      return (entity.attributes.raw_today_epex || []).map(p => [new Date(p.start).getTime(), p.value]);
+```
+
+### Live P1-tegels (alleen in pull-modus)
+
+```yaml
+type: horizontal-stack
+cards:
+  - type: tile
+    entity: sensor.actief_vermogen
+    name: Nu
+  - type: tile
+    entity: sensor.teruglevering_vermogen
+    name: Terug
+  - type: tile
+    entity: sensor.gas_totaal
+    name: Gas
+```
+
+### Het SlimHuys-dashboard zelf in HA?
+
+Een **webpagina-kaart** met `https://slimhuys.nl/app` werkt niet: slimhuys.nl
+stuurt bewust `X-Frame-Options: DENY` mee om clickjacking te voorkomen, dus
+je browser weigert het iframe. Een snelkoppeling kan wél:
+
+```yaml
+type: markdown
+content: '[Open SlimHuys →](https://slimhuys.nl/app)'
+```
 
 ## Configuratie wijzigen
 

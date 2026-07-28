@@ -145,11 +145,20 @@ Aangemaakte sensors:
 | `sensor.temperatuur` | °C | temperature |
 | `sensor.luchtvochtigheid` | % | humidity |
 
-De meter levert afname en teruglevering als twee losse, altijd-positieve
-velden — `sensor.actief_vermogen` wordt dus nooit negatief, ook niet als je
-netto terugleeft. Wil je één getal met richting (zoals `sensor.vermogen_l*`),
-gebruik dan `sensor.netto_vermogen`: positief = van het net, negatief = naar
-het net.
+Afname en teruglevering zijn twee losse, altijd-positieve registers van de
+meter (OBIS `1-0:1.7.0` en `1-0:2.7.0`) — géén splitsing van één netto-getal.
+Op een 3-fase-aansluiting kunnen ze daarom **tegelijk** een waarde hebben:
+exporteert je omvormer 4.234 W via L2 + L3 terwijl je kookplaat 1.379 W van
+L1 trekt, dan zie je 1.379 W afname én 4.234 W teruglevering. Op 1-fase is er
+altijd precies één van de twee nul. `sensor.actief_vermogen` wordt nooit
+negatief, ook niet als je netto terugleeft.
+
+`sensor.netto_vermogen` is het verschil van die twee: positief = van het net,
+negatief = naar het net (zelfde conventie als `sensor.vermogen_l*`). Handig om
+in één oogopslag de richting te zien, maar het is een lossy getal — je kunt de
+twee bruto-waarden er niet uit terugrekenen. Voor kostenberekeningen gebruik je
+`actief_vermogen` en `teruglevering_vermogen` los van elkaar, want afname en
+teruglevering hebben verschillende tarieven.
 
 3-fase entities worden alleen aangemaakt voor fasen die de meter rapporteert
 (via een eenmalige `/current`-probe bij setup). 1-fase huishoudens krijgen

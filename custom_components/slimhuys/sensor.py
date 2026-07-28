@@ -787,11 +787,17 @@ class LiveActivePowerReturnedSensor(_LiveBaseSensor):
 class LiveNetPowerSensor(_LiveBaseSensor):
     """Netto vermogen — signed, zelfde conventie als de fase-sensoren.
 
-    De meter levert afname en teruglevering als twee losse, altijd-positieve
-    velden. `sensor.actief_vermogen` kan daardoor nooit negatief worden, ook
-    niet als je netto flink terugleeft — verwarrend naast `sensor.vermogen_l*`,
-    die wél signed zijn. Deze sensor telt ze samen: positief = van het net,
+    Afname en teruglevering zijn twee losse, altijd-positieve meter-registers
+    (OBIS 1.7.0 / 2.7.0), geen splitsing van één netto-getal: op 3-fase kunnen
+    ze tegelijk ≠ 0 zijn (import op de ene fase, export op de andere).
+    `sensor.actief_vermogen` wordt daardoor nooit negatief, ook niet als je
+    netto flink terugleeft — verwarrend naast `sensor.vermogen_l*`, die wél
+    signed zijn. Deze sensor trekt ze van elkaar af: positief = van het net,
     negatief = naar het net.
+
+    Bewust lossy: uit dit getal alleen zijn de twee bruto-waarden niet terug
+    te rekenen. Voor kosten (afname- en teruglevertarief verschillen) moet je
+    de losse sensoren gebruiken, niet deze.
     """
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT

@@ -2,20 +2,77 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import SlimHuysApiError, SlimHuysClient
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import (
+    CHEAPEST_BLOCK_HOURS,
+    DEFAULT_RESOLUTION_MINUTES,
+    DOMAIN,
+    SCAN_INTERVAL,
+    TIMEZONE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
+NL_TZ = ZoneInfo(TIMEZONE)
+
+
+def nl_now() -> datetime:
+    """Huidige tijd in Europe/Amsterdam — DST-correct."""
+    return datetime.now(NL_TZ)
+
+
+def parse_iso(ts: str | None) -> datetime | None:
+    """ISO-8601 → aware datetime. Naïeve input geldt als NL-tijd.
+
+    De API levert offsets (`+02:00`); alleen als die ontbreekt vullen we NL
+    aan. De offset zelf blijft staan — normaliseren naar één tijdzone doen we
+    pas bewust in `_build_slots`.
+    """
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+    return dt.replace(tzinfo=NL_TZ) if dt.tzinfo is None else dt
+
+
+def slot_index_now(slots: list[dict[str, Any]]) -> int | None:
+    """Index van het slot waar 'nu' in valt, of `None` als er geen match is."""
+    now = datetime.now(timezone.utc)
+    for i, s in enumerate(slots):
+        if s["start"] <= now < s["end"]:
+            return i
+    return None
+
+
+def slots_for_day(
+    slots: list[dict[str, Any]], day: str
+) -> list[dict[str, Any]]:
+    return [s for s in slots if s["day"] == day]
+
+
+def day_is_complete(slots: list[dict[str, Any]]) -> bool:
+    """Dekken deze slots een hele dag? Ondergrens 23u i.v.m. DST-krimpdag."""
+    covered = sum(s["resolution_minutes"] for s in slots)
+    return covered >= 23 * 60
+
 
 class SlimHuysCoordinator(DataUpdateCoordinator):
-    """Polls /v1/prices/* and aggregates today's hourly prices."""
+    """Polls /v1/prices/* en bewaart de prijzen op hun eigen resolutie.
+
+    Bewust géén aggregatie naar uren: de API levert per leverancier de
+    resolutie waarop die factureert (`resolution_minutes`, 15 of 60). Een
+    kwartier-leverancier hoort ook kwartierprijzen in HA te krijgen — anders
+    middel je precies de prijspieken weg waarop je wilt schakelen.
+    """
 
     def __init__(
         self,
@@ -36,42 +93,32 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
         try:
             current = await self._client.current_price(self._supplier)
 
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = nl_now().replace(hour=0, minute=0, second=0, microsecond=0)
             tomorrow_end = today_start + timedelta(days=2)
+            from_iso = today_start.strftime("%Y-%m-%dT%H:%M:%S")
+            to_iso = tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S")
             range_resp = await self._client.price_range(
-                self._supplier,
-                today_start.strftime("%Y-%m-%dT%H:%M:%S"),
-                tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S"),
+                self._supplier, from_iso, to_iso
             )
         except SlimHuysApiError as err:
             raise UpdateFailed(str(err)) from err
 
         points = range_resp.get("points", []) if range_resp else []
-        hourly = self._aggregate_hourly(points)
-
-        # Goedkoopste 3-uurs venster vanaf nu (vandaag of morgen)
-        cheapest = self._find_cheapest_block(hourly, slots=3, start_idx=datetime.now().hour)
-
-        # Negatieve uren — eerstvolgende
-        negative = self._find_next_negative(hourly)
+        resolution = self._resolution(range_resp, points)
+        slots = self._build_consume_slots(points, resolution)
 
         data = {
             "current": current,
-            "hourly": hourly,
-            "points": points,
-            "cheapest_block": cheapest,
-            "next_negative": negative,
+            "slots": slots,
+            "resolution_minutes": resolution,
+            "cheapest_block": self._find_cheapest_block(slots, CHEAPEST_BLOCK_HOURS),
+            "next_negative": self._find_next_negative(slots),
             "supplier": self._supplier,
-            "fetched_at": datetime.now().isoformat(),
+            "fetched_at": nl_now().isoformat(),
         }
 
         # Teruglevering — mag falen zonder de consume-sensoren te breken.
-        data.update(
-            await self._fetch_feedin(
-                today_start.strftime("%Y-%m-%dT%H:%M:%S"),
-                tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S"),
-            )
-        )
+        data.update(await self._fetch_feedin(from_iso, to_iso))
         return data
 
     async def _fetch_feedin(self, from_iso: str, to_iso: str) -> dict[str, Any]:
@@ -85,8 +132,8 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
         """
         empty = {
             "feedin_current": None,
-            "feedin_points": [],
-            "feedin_hourly": [],
+            "feedin_slots": [],
+            "feedin_resolution_minutes": DEFAULT_RESOLUTION_MINUTES,
             "feedin_model": None,
         }
         try:
@@ -106,112 +153,152 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
             return empty
 
         now = (current or {}).get("now") or {}
+        resolution = self._resolution(range_resp, points)
         return {
             "feedin_current": current if "feedin" in now else None,
-            "feedin_points": points,
-            "feedin_hourly": self._aggregate_feedin_hourly(points),
+            "feedin_slots": self._build_feedin_slots(points, resolution),
+            "feedin_resolution_minutes": resolution,
             "feedin_model": (range_resp or {}).get("feedin_model"),
         }
 
     @staticmethod
-    def _aggregate_hourly(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Aggregate consume-points (`breakdown`) to 24+24 hour-buckets."""
-        return SlimHuysCoordinator._aggregate(
+    def _resolution(range_resp: dict[str, Any] | None, points: list[dict]) -> int:
+        """Resolutie in minuten, uit de API zelf (bereik-veld, anders 1e punt).
+
+        Nooit afleiden uit het aantal punten: 24 uurprijzen × 2 dagen ziet er
+        precies zo uit als één dag kwartierprijzen.
+        """
+        for src in ((range_resp or {}), *points[:1]):
+            res = src.get("resolution_minutes")
+            if isinstance(res, (int, float)) and res > 0:
+                return int(res)
+        return DEFAULT_RESOLUTION_MINUTES
+
+    @staticmethod
+    def _build_consume_slots(
+        points: list[dict[str, Any]], resolution: int
+    ) -> list[dict[str, Any]]:
+        """Consume-punten (`breakdown`) → slots op eigen resolutie."""
+        return SlimHuysCoordinator._build_slots(
             points,
             lambda p: (p.get("breakdown") or {}).get("total_eur_per_kwh"),
             lambda p: (p.get("breakdown") or {}).get("epex_eur_per_kwh"),
+            resolution,
         )
 
     @staticmethod
-    def _aggregate_feedin_hourly(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Aggregate feedin-points (`feedin`) to 24+24 hour-buckets.
+    def _build_feedin_slots(
+        points: list[dict[str, Any]], resolution: int
+    ) -> list[dict[str, Any]]:
+        """Feedin-punten (`feedin`) → slots met dezelfde vorm als consume.
 
-        Zelfde bucket-vorm als consume (`price`/`epex`/`start_ts`) zodat de
-        sensor-helpers ongewijzigd werken; `price` is hier de teruglever-rate.
+        `price` is hier de teruglever-rate, zodat de sensor-helpers voor beide
+        richtingen ongewijzigd werken.
         """
-        return SlimHuysCoordinator._aggregate(
+        return SlimHuysCoordinator._build_slots(
             points,
             lambda p: (p.get("feedin") or {}).get("feedin_eur_per_kwh"),
             lambda p: (p.get("feedin") or {}).get("epex_eur_per_kwh"),
+            resolution,
         )
 
     @staticmethod
-    def _aggregate(
+    def _build_slots(
         points: list[dict[str, Any]],
         get_price: Any,
         get_epex: Any,
+        resolution: int,
     ) -> list[dict[str, Any]]:
-        """Aggregate 15-min or 60-min points to 24+24 hour-buckets (today + tomorrow)."""
-        buckets: dict[str, dict[int, dict[str, Any]]] = {}
-        for p in points:
-            ts = p.get("timestamp", "")
-            if len(ts) < 13:
-                continue
-            price = get_price(p)
-            if price is None:
-                continue
-            day = ts[:10]
-            hour = int(ts[11:13])
-            bucket = buckets.setdefault(day, {}).setdefault(
-                hour, {"prices": [], "epex": [], "start_ts": ts}
-            )
-            bucket["prices"].append(price)
-            epex = get_epex(p)
-            if epex is not None:
-                bucket["epex"].append(epex)
+        """Eén slot per API-punt, chronologisch, zonder gaten op te vullen.
 
-        result = []
-        for day in sorted(buckets.keys()):
-            for hour in range(24):
-                b = buckets[day].get(hour)
-                if b and b["prices"]:
-                    avg = sum(b["prices"]) / len(b["prices"])
-                    epex_avg = (
-                        sum(b["epex"]) / len(b["epex"]) if b["epex"] else None
-                    )
-                    start_ts = b["start_ts"]
-                else:
-                    avg = None
-                    epex_avg = None
-                    start_ts = None
-                result.append(
-                    {
-                        "day": day,
-                        "hour": hour,
-                        "price": avg,
-                        "epex": epex_avg,
-                        "start_ts": start_ts,
-                    }
-                )
-        return result
+        `start`/`end` staan in UTC, `*_local` en `day`/`hour`/`minute` in
+        NL-tijd. Die splitsing is niet cosmetisch: Python trekt twee datetimes
+        met dezelfde tzinfo op wandkloktijd van elkaar af, dus in één ZoneInfo
+        lijkt de DST-sprong 01:00→03:00 twee uur te duren. Alle rekenwerk
+        (contiguïteit, "is dit slot al voorbij") gaat daarom over UTC.
+        """
+        slots: list[dict[str, Any]] = []
+        for p in points:
+            price = get_price(p)
+            start = parse_iso(p.get("timestamp"))
+            if price is None or start is None:
+                continue
+            res = int(p.get("resolution_minutes") or resolution)
+            end = parse_iso(p.get("valid_until")) or start + timedelta(minutes=res)
+            start_local = start.astimezone(NL_TZ)
+            end_local = end.astimezone(NL_TZ)
+            slots.append(
+                {
+                    "day": start_local.strftime("%Y-%m-%d"),
+                    "hour": start_local.hour,
+                    "minute": start_local.minute,
+                    "price": price,
+                    "epex": get_epex(p),
+                    "start": start.astimezone(timezone.utc),
+                    "end": end.astimezone(timezone.utc),
+                    "end_local": end_local,
+                    "start_ts": start_local.isoformat(),
+                    "end_ts": end_local.isoformat(),
+                    "resolution_minutes": res,
+                }
+            )
+        slots.sort(key=lambda s: s["start"])
+        return slots
 
     @staticmethod
     def _find_cheapest_block(
-        hourly: list[dict[str, Any]],
-        slots: int,
-        start_idx: int = 0,
+        slots: list[dict[str, Any]], hours: int = CHEAPEST_BLOCK_HOURS
     ) -> dict[str, Any] | None:
+        """Goedkoopste aaneengesloten venster van `hours` uur, vanaf nu.
+
+        Schuift per slot op, niet per uur: bij een kwartier-leverancier vind
+        je dus ook blokken die om :15 beginnen. Vensters met een gat in de
+        reeks (ontbrekende prijzen) worden overgeslagen.
+        """
+        now = datetime.now(timezone.utc)
         best = None
-        for i in range(start_idx, len(hourly) - slots + 1):
-            window = hourly[i : i + slots]
-            if any(h["price"] is None for h in window):
+        for i, first in enumerate(slots):
+            if first["end"] <= now:
+                continue  # blok zou volledig in het verleden starten
+            res = first["resolution_minutes"] or DEFAULT_RESOLUTION_MINUTES
+            count = max(1, round(hours * 60 / res))
+            window = slots[i : i + count]
+            if len(window) < count:
                 continue
-            avg = sum(h["price"] for h in window) / slots
+            step = timedelta(minutes=res)
+            if any(
+                window[k]["start"] - first["start"] != k * step for k in range(count)
+            ):
+                continue
+            avg = sum(s["price"] for s in window) / count
             if best is None or avg < best["avg"]:
+                last = window[-1]
                 best = {
-                    "start_day": window[0]["day"],
-                    "start_hour": window[0]["hour"],
-                    "end_hour": (window[0]["hour"] + slots) % 24,
+                    "start_day": first["day"],
+                    "start_hour": first["hour"],
+                    "start_minute": first["minute"],
+                    "start_ts": first["start_ts"],
+                    "end_hour": last["end_local"].hour,
+                    "end_minute": last["end_local"].minute,
+                    "end_ts": last["end_ts"],
                     "avg": avg,
+                    "duration_hours": hours,
                 }
         return best
 
     @staticmethod
-    def _find_next_negative(hourly: list[dict[str, Any]]) -> dict[str, Any] | None:
-        now_hour = datetime.now().hour
-        for i, h in enumerate(hourly):
-            if i < now_hour:
+    def _find_next_negative(slots: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Eerste nog niet verstreken slot met een negatieve totaalprijs."""
+        now = datetime.now(timezone.utc)
+        for s in slots:
+            if s["end"] <= now:
                 continue
-            if h["price"] is not None and h["price"] < 0:
-                return {"day": h["day"], "hour": h["hour"], "price": h["price"]}
+            if s["price"] < 0:
+                return {
+                    "day": s["day"],
+                    "hour": s["hour"],
+                    "minute": s["minute"],
+                    "price": s["price"],
+                    "start_ts": s["start_ts"],
+                }
         return None

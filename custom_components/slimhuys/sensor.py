@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -58,7 +58,12 @@ from .const import (
     LIVE_SUFFIX_WATER_TOTAL,
     P1_MODE_PULL,
 )
-from .coordinator import SlimHuysCoordinator
+from .coordinator import (
+    SlimHuysCoordinator,
+    day_is_complete,
+    nl_now,
+    slots_for_day,
+)
 from .live_coordinator import SlimHuysLiveCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -274,10 +279,8 @@ class TodayLowestSensor(_BaseSensor):
 
     @property
     def native_value(self) -> float | None:
-        hourly = (self.coordinator.data or {}).get("hourly", [])
-        # Filter naar vandaag
-        today = (self.coordinator.data or {}).get("fetched_at", "")[:10]
-        prices = [h["price"] for h in hourly if h["day"] == today and h["price"] is not None]
+        slots = (self.coordinator.data or {}).get("slots", [])
+        prices = [s["price"] for s in slots_for_day(slots, _today_str())]
         return min(prices) if prices else None
 
 
@@ -292,9 +295,8 @@ class TodayHighestSensor(_BaseSensor):
 
     @property
     def native_value(self) -> float | None:
-        hourly = (self.coordinator.data or {}).get("hourly", [])
-        today = (self.coordinator.data or {}).get("fetched_at", "")[:10]
-        prices = [h["price"] for h in hourly if h["day"] == today and h["price"] is not None]
+        slots = (self.coordinator.data or {}).get("slots", [])
+        prices = [s["price"] for s in slots_for_day(slots, _today_str())]
         return max(prices) if prices else None
 
 
@@ -309,7 +311,7 @@ class CheapestBlockStartSensor(_BaseSensor):
         b = (self.coordinator.data or {}).get("cheapest_block")
         if not b:
             return None
-        return f"{b['start_day']} {b['start_hour']:02d}:00"
+        return f"{b['start_day']} {b['start_hour']:02d}:{b['start_minute']:02d}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -319,8 +321,12 @@ class CheapestBlockStartSensor(_BaseSensor):
         return {
             "start_day": b["start_day"],
             "start_hour": b["start_hour"],
+            "start_minute": b["start_minute"],
+            "start_ts": b["start_ts"],
             "end_hour": b["end_hour"],
-            "duration_hours": 3,
+            "end_minute": b["end_minute"],
+            "end_ts": b["end_ts"],
+            "duration_hours": b["duration_hours"],
         }
 
 
@@ -350,14 +356,20 @@ class NextNegativeSensor(_BaseSensor):
         n = (self.coordinator.data or {}).get("next_negative")
         if not n:
             return "geen"
-        return f"{n['day']} {n['hour']:02d}:00"
+        return f"{n['day']} {n['hour']:02d}:{n['minute']:02d}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         n = (self.coordinator.data or {}).get("next_negative")
         if not n:
             return None
-        return {"day": n["day"], "hour": n["hour"], "price_eur_per_kwh": n["price"]}
+        return {
+            "day": n["day"],
+            "hour": n["hour"],
+            "minute": n["minute"],
+            "start_ts": n["start_ts"],
+            "price_eur_per_kwh": n["price"],
+        }
 
 
 class CurrentLevelSensor(_BaseSensor):
@@ -376,49 +388,60 @@ class CurrentLevelSensor(_BaseSensor):
 # ---------- Today/tomorrow price arrays (dashboard-friendly) ----------
 
 
-def _nl_now() -> datetime:
-    """Huidige tijd in Europe/Amsterdam — DST-correct."""
-    from zoneinfo import ZoneInfo  # Python 3.9+, altijd beschikbaar in HA
-    return datetime.now(ZoneInfo("Europe/Amsterdam"))
-
-
 def _today_str() -> str:
-    return _nl_now().strftime("%Y-%m-%d")
+    return nl_now().strftime("%Y-%m-%d")
 
 
 def _tomorrow_str() -> str:
-    return (_nl_now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    return (nl_now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def _end_iso(start_iso: str, minutes: int) -> str | None:
-    try:
-        dt = datetime.fromisoformat(start_iso)
-    except ValueError:
-        return None
-    return (dt + timedelta(minutes=minutes)).isoformat()
-
-
-def _granularity_minutes(points: list[dict[str, Any]]) -> int:
-    """Detect grid: 15 (≥48 points across 2 days) of 60. Default 60."""
-    return 15 if len(points) >= 48 else 60
-
-
-def _build_hourly_raw(
-    hourly: list[dict[str, Any]], day: str, field: str = "price"
+def _build_raw(
+    slots: list[dict[str, Any]], field: str = "price"
 ) -> list[dict[str, Any]]:
-    out = []
-    for h in hourly:
-        if h["day"] != day or h.get(field) is None or not h.get("start_ts"):
-            continue
-        end = _end_iso(h["start_ts"], 60)
-        if end is None:
-            continue
-        out.append({"start": h["start_ts"], "end": end, "value": h[field]})
-    return out
+    """ApexCharts-vorm: `{start, end, value}` per slot, op eigen resolutie."""
+    return [
+        {"start": s["start_ts"], "end": s["end_ts"], "value": s[field]}
+        for s in slots
+        if s.get(field) is not None
+    ]
+
+
+def _day_attrs(
+    slots: list[dict[str, Any]],
+    day: str,
+    resolution: int,
+    raw_key: str,
+    supplier: str,
+) -> dict[str, Any] | None:
+    """Gedeelde attributen voor de dag-arrays (consume én feedin).
+
+    `prices` volgt de resolutie van de leverancier: 96 waarden bij kwartier,
+    24 bij uur. `granularity_minutes` zegt welke, zodat een dashboard niet
+    hoeft te raden aan de lengte van de array.
+    """
+    day_slots = slots_for_day(slots, day)
+    prices = [s["price"] for s in day_slots]
+    if not prices:
+        return None
+    return {
+        "prices": prices,
+        raw_key: _build_raw(day_slots),
+        f"{raw_key}_epex": _build_raw(day_slots, field="epex"),
+        "granularity_minutes": resolution,
+        "average": sum(prices) / len(prices),
+        "min": min(prices),
+        "max": max(prices),
+        "supplier": supplier,
+    }
 
 
 class PricesTodaySensor(_BaseSensor):
-    """Uurprijzen vandaag — state = huidige prijs, attrs = array + raw_today."""
+    """Prijzen vandaag — state = huidige prijs, attrs = array + raw_today.
+
+    Op de resolutie van de leverancier: kwartier-leveranciers krijgen 96
+    waarden, uur-leveranciers 24.
+    """
 
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -439,26 +462,17 @@ class PricesTodaySensor(_BaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         data = self.coordinator.data or {}
-        hourly = data.get("hourly", [])
-        today = _today_str()
-        prices = [
-            h["price"] for h in hourly if h["day"] == today and h["price"] is not None
-        ]
-        if not prices:
-            return None
-        return {
-            "prices": prices,
-            "raw_today": _build_hourly_raw(hourly, today),
-            "raw_today_epex": _build_hourly_raw(hourly, today, field="epex"),
-            "average": sum(prices) / len(prices),
-            "min": min(prices),
-            "max": max(prices),
-            "supplier": self._supplier,
-        }
+        return _day_attrs(
+            data.get("slots", []),
+            _today_str(),
+            data.get("resolution_minutes", 60),
+            "raw_today",
+            self._supplier,
+        )
 
 
 class PricesTomorrowSensor(_BaseSensor):
-    """Uurprijzen morgen — state = daggemiddelde, None vóór EPEX-publicatie (~14:00)."""
+    """Prijzen morgen — state = daggemiddelde, None vóór EPEX-publicatie (~14:00)."""
 
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -470,100 +484,60 @@ class PricesTomorrowSensor(_BaseSensor):
 
     @property
     def native_value(self) -> float | None:
-        hourly = (self.coordinator.data or {}).get("hourly", [])
-        tomorrow = _tomorrow_str()
-        prices = [
-            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
-        ]
+        data = self.coordinator.data or {}
+        prices = [s["price"] for s in slots_for_day(data.get("slots", []), _tomorrow_str())]
         if not prices:
             return None
         return sum(prices) / len(prices)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        hourly = (self.coordinator.data or {}).get("hourly", [])
+        data = self.coordinator.data or {}
         tomorrow = _tomorrow_str()
-        prices = [
-            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
-        ]
-        # `valid: false` voor 14:00 — geen `unavailable` om automation-warnings te vermijden
-        valid = len(prices) >= 24
-        return {
-            "valid": valid,
-            "prices": prices,
-            "raw_tomorrow": _build_hourly_raw(hourly, tomorrow),
-            "raw_tomorrow_epex": _build_hourly_raw(hourly, tomorrow, field="epex"),
-            "average": (sum(prices) / len(prices)) if prices else None,
-            "min": min(prices) if prices else None,
-            "max": max(prices) if prices else None,
+        day_slots = slots_for_day(data.get("slots", []), tomorrow)
+        attrs = _day_attrs(
+            data.get("slots", []),
+            tomorrow,
+            data.get("resolution_minutes", 60),
+            "raw_tomorrow",
+            self._supplier,
+        ) or {
+            "prices": [],
+            "raw_tomorrow": [],
+            "raw_tomorrow_epex": [],
+            "granularity_minutes": data.get("resolution_minutes", 60),
+            "average": None,
+            "min": None,
+            "max": None,
             "supplier": self._supplier,
         }
+        # `valid: false` vóór 14:00 — geen `unavailable`, dat geeft
+        # automation-warnings. Op dekking gemeten, niet op aantal waarden:
+        # 96 kwartieren en 24 uren zijn allebei een volle dag.
+        attrs["valid"] = day_is_complete(day_slots)
+        return attrs
 
 
-class PricesTodayQuarterSensor(_BaseSensor):
-    """Native granulariteit (15-min als de API ze levert) — voor fijne charts."""
+class PricesTodayQuarterSensor(PricesTodaySensor):
+    """Alias van `prijzen_vandaag`, bewaard voor bestaande dashboards.
 
-    _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_suggested_display_precision = 4
+    Sinds prijzen niet meer naar uren geaggregeerd worden levert
+    `prijzen_vandaag` zelf al de native resolutie; deze entity is identiek en
+    blijft alleen bestaan zodat kaarten die 'm noemen niet breken.
+    """
+
+    _attr_device_class = None
     _attr_icon = "mdi:chart-timeline-variant"
 
     def __init__(self, coordinator, entry, supplier):
-        super().__init__(
-            coordinator, entry, supplier, "prices_today_quarter", "Prijzen vandaag (kwartier)"
+        _BaseSensor.__init__(
+            self,
+            coordinator,
+            entry,
+            supplier,
+            "prices_today_quarter",
+            "Prijzen vandaag (kwartier)",
         )
-
-    @property
-    def native_value(self) -> float | None:
-        points = (self.coordinator.data or {}).get("points", [])
-        if not points:
-            return None
-        gran = _granularity_minutes(points)
-        today = _today_str()
-        now = datetime.now(timezone.utc)
-        for p in points:
-            ts = p.get("timestamp", "")
-            if not ts.startswith(today):
-                continue
-            try:
-                slot_start = datetime.fromisoformat(ts)
-                if slot_start.tzinfo is None:
-                    slot_start = slot_start.replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-            if slot_start <= now < slot_start + timedelta(minutes=gran):
-                return p["breakdown"]["total_eur_per_kwh"]
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        points = (self.coordinator.data or {}).get("points", [])
-        if not points:
-            return None
-        today = _today_str()
-        gran = _granularity_minutes(points)
-        today_points = [p for p in points if p.get("timestamp", "").startswith(today)]
-        prices = [p["breakdown"]["total_eur_per_kwh"] for p in today_points]
-        if not prices:
-            return None
-        raw: list[dict[str, Any]] = []
-        for p in today_points:
-            start = p["timestamp"]
-            end = _end_iso(start, gran)
-            if end is None:
-                continue
-            raw.append(
-                {"start": start, "end": end, "value": p["breakdown"]["total_eur_per_kwh"]}
-            )
-        return {
-            "prices": prices,
-            "raw_today": raw,
-            "granularity_minutes": gran,
-            "average": sum(prices) / len(prices),
-            "min": min(prices),
-            "max": max(prices),
-            "supplier": self._supplier,
-        }
 
 
 # ---------- Teruglevering (feedin) ----------
@@ -650,22 +624,15 @@ class FeedinTodaySensor(_BaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         data = self.coordinator.data or {}
-        hourly = data.get("feedin_hourly", [])
-        today = _today_str()
-        prices = [
-            h["price"] for h in hourly if h["day"] == today and h["price"] is not None
-        ]
-        if not prices:
+        attrs = _day_attrs(
+            data.get("feedin_slots", []),
+            _today_str(),
+            data.get("feedin_resolution_minutes", 60),
+            "raw_today",
+            self._supplier,
+        )
+        if attrs is None:
             return None
-        attrs = {
-            "prices": prices,
-            "raw_today": _build_hourly_raw(hourly, today),
-            "raw_today_epex": _build_hourly_raw(hourly, today, field="epex"),
-            "average": sum(prices) / len(prices),
-            "min": min(prices),
-            "max": max(prices),
-            "supplier": self._supplier,
-        }
         attrs.update(_feedin_model_attrs(data.get("feedin_model")))
         return attrs
 
@@ -683,10 +650,10 @@ class FeedinTomorrowSensor(_BaseSensor):
 
     @property
     def native_value(self) -> float | None:
-        hourly = (self.coordinator.data or {}).get("feedin_hourly", [])
-        tomorrow = _tomorrow_str()
+        data = self.coordinator.data or {}
         prices = [
-            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
+            s["price"]
+            for s in slots_for_day(data.get("feedin_slots", []), _tomorrow_str())
         ]
         if not prices:
             return None
@@ -695,23 +662,27 @@ class FeedinTomorrowSensor(_BaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         data = self.coordinator.data or {}
-        hourly = data.get("feedin_hourly", [])
         tomorrow = _tomorrow_str()
-        prices = [
-            h["price"] for h in hourly if h["day"] == tomorrow and h["price"] is not None
-        ]
-        # `valid: false` vóór ENTSO-E-publicatie — geen `unavailable`
-        valid = len(prices) >= 24
-        attrs = {
-            "valid": valid,
-            "prices": prices,
-            "raw_tomorrow": _build_hourly_raw(hourly, tomorrow),
-            "raw_tomorrow_epex": _build_hourly_raw(hourly, tomorrow, field="epex"),
-            "average": (sum(prices) / len(prices)) if prices else None,
-            "min": min(prices) if prices else None,
-            "max": max(prices) if prices else None,
+        resolution = data.get("feedin_resolution_minutes", 60)
+        day_slots = slots_for_day(data.get("feedin_slots", []), tomorrow)
+        attrs = _day_attrs(
+            data.get("feedin_slots", []),
+            tomorrow,
+            resolution,
+            "raw_tomorrow",
+            self._supplier,
+        ) or {
+            "prices": [],
+            "raw_tomorrow": [],
+            "raw_tomorrow_epex": [],
+            "granularity_minutes": resolution,
+            "average": None,
+            "min": None,
+            "max": None,
             "supplier": self._supplier,
         }
+        # `valid: false` vóór ENTSO-E-publicatie — geen `unavailable`
+        attrs["valid"] = day_is_complete(day_slots)
         attrs.update(_feedin_model_attrs(data.get("feedin_model")))
         return attrs
 

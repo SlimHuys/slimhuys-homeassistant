@@ -21,6 +21,17 @@ VERSION = _read_manifest_version()
 # How often we poll the SlimHuys API for fresh prices.
 SCAN_INTERVAL = timedelta(minutes=5)
 
+# Alle prijs-timestamps worden in NL-tijd geïnterpreteerd — dag- en uurgrenzen
+# op het dashboard moeten met de EPEX-dag meelopen, niet met de HA-systeem-tz.
+TIMEZONE = "Europe/Amsterdam"
+
+# De API geeft `resolution_minutes` per leverancier (15 of 60). Deze fallback
+# geldt alleen als dat veld ontbreekt — nooit raden op basis van puntaantal.
+DEFAULT_RESOLUTION_MINUTES = 60
+
+# Lengte van het venster dat `sensor.*_goedkoopste_blok_*` zoekt.
+CHEAPEST_BLOCK_HOURS = 3
+
 # Config-flow keys
 CONF_API_KEY = "api_key"
 CONF_BASE_URL = "base_url"

@@ -16,13 +16,13 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 | `sensor.daggemiddelde` | EUR/kWh | `0.217` |
 | `sensor.laagste_vandaag` | EUR/kWh | `0.089` |
 | `sensor.hoogste_vandaag` | EUR/kWh | `0.464` |
-| `sensor.goedkoopste_blok_start` | string | `"2026-04-30 02:00"` |
+| `sensor.goedkoopste_blok_start` | string | `"2026-04-30 02:15"` |
 | `sensor.goedkoopste_blok_gemiddelde` | EUR/kWh | `0.094` |
-| `sensor.volgende_negatieve_prijs` | string | `"2026-04-30 13:00"` |
+| `sensor.volgende_negatieve_prijs` | string | `"2026-04-30 13:45"` |
 | `sensor.tariefniveau_nu` | enum | `very_low / low / medium / high / peak` |
-| `sensor.prijzen_vandaag` | EUR/kWh + `prices[24]` attr | `0.158` |
-| `sensor.prijzen_morgen` | EUR/kWh + `prices[24]` attr | `0.187` of `unknown` |
-| `sensor.prijzen_vandaag_kwartier` | EUR/kWh + `prices[96]` attr | `0.155` |
+| `sensor.prijzen_vandaag` | EUR/kWh + `prices[96\|24]` attr | `0.158` |
+| `sensor.prijzen_morgen` | EUR/kWh + `prices[96\|24]` attr | `0.187` of `unknown` |
+| `sensor.prijzen_vandaag_kwartier` | alias van `prijzen_vandaag` | `0.155` |
 | `sensor.teruglevering_nu` | EUR/kWh | `0.071` |
 | `sensor.teruglevering_vandaag` | EUR/kWh + `raw_today` attr | `0.071` |
 | `sensor.teruglevering_morgen` | EUR/kWh + `raw_tomorrow` attr | `0.084` of `unknown` |
@@ -39,10 +39,11 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 
 ```yaml
 attributes:
-  prices: [0.18, 0.17, …]        # 24 all-in EUR/kWh
+  prices: [0.18, 0.17, …]          # all-in EUR/kWh, 96 bij kwartier / 24 bij uur
+  granularity_minutes: 15          # resolutie van je leverancier
   raw_today:                       # voor ApexCharts e.d.
     - start: "2026-05-16T00:00:00+02:00"
-      end:   "2026-05-16T01:00:00+02:00"
+      end:   "2026-05-16T00:15:00+02:00"
       value: 0.18
   raw_today_epex: [...]            # kale EPEX (zonder marge/btw/EB)
   average: 0.21
@@ -50,7 +51,20 @@ attributes:
   max: 0.46
 ```
 
-`prijzen_morgen` is `unknown` tot EPEX day-ahead publiceert (~14:00 CET) — attribuut `valid: true` zodra alle 24 uur beschikbaar zijn. `prijzen_vandaag_kwartier` levert de native granulariteit van de API (15-min op de meeste leveranciers, 60-min als fallback) — `granularity_minutes` attribuut geeft aan welke.
+**Prijzen volgen de resolutie van je leverancier.** Rekent die per kwartier af
+(Zonneplan, Tibber, Frank, easyEnergy, Coolblue …), dan krijg je 96 waarden per
+dag; rekent die per uur af (ANWB, Budget …), dan 24. De integratie middelt
+kwartieren niet meer weg naar uurprijzen — dat maakte precies de pieken onzichtbaar
+waarop je wilt schakelen. `granularity_minutes` zegt welke resolutie je hebt, dus
+een dashboard hoeft niet aan de lengte van `prices` te raden.
+
+Ook `goedkoopste_blok_start` en `volgende_negatieve_prijs` schuiven daardoor per
+kwartier op: een blok kan nu op `13:45` beginnen in plaats van alleen op hele uren.
+
+`prijzen_morgen` is `unknown` tot EPEX day-ahead publiceert (~14:00 CET) —
+attribuut `valid: true` zodra de hele dag binnen is. `prijzen_vandaag_kwartier` is
+sinds v1.4.0 een alias van `prijzen_vandaag` (die levert zelf al de native
+resolutie) en blijft bestaan zodat bestaande kaarten niet breken.
 
 Plus **één service** voor terug-push naar SlimHuys:
 
@@ -289,9 +303,9 @@ series:
 De morgen-reeks is leeg tot EPEX day-ahead publiceert (~14:00 CET) — de
 grafiek toont dan simpelweg alleen vandaag, geen foutmelding.
 
-**Liever kwartier-precisie?** Vervang de eerste reeks door
-`sensor.prijzen_vandaag_kwartier` (zelfde `raw_today`-vorm, 96 punten) en
-zet `graph_span: 1d`.
+Kwartier-precisie hoef je niet apart aan te zetten: `raw_today` heeft al de
+resolutie van je leverancier. Bij een kwartier-leverancier staan er 96 punten
+in — zet `graph_span: 1d` als je die dag-in-detail wilt zien.
 
 **Teruglevering erbij?** Voeg een derde reeks toe met
 `entity: sensor.teruglevering_vandaag` — die heeft exact dezelfde

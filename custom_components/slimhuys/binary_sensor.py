@@ -7,7 +7,6 @@ waarop terugleveren geld kost en je zonnepanelen wilt dimmen/uitzetten.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -17,7 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, NEGATIVE_PRICE_THRESHOLD
-from .coordinator import SlimHuysCoordinator
+from .coordinator import SlimHuysCoordinator, slot_index_now
 
 
 async def async_setup_entry(
@@ -31,40 +30,30 @@ async def async_setup_entry(
     async_add_entities([NegativePriceBinarySensor(coordinator, entry, supplier)])
 
 
-def _now_index(hourly: list[dict[str, Any]]) -> int | None:
-    """Index van het huidige uur in de hourly-lijst (dag + uur match)."""
-    now = datetime.now()
-    today = now.strftime("%Y-%m-%d")
-    for i, h in enumerate(hourly):
-        if h["day"] == today and h["hour"] == now.hour:
-            return i
-    return None
-
-
-def _negative_run_end(hourly: list[dict[str, Any]]) -> str | None:
-    """Start-ts van het eerste uur (vanaf nu) waarop de EPEX weer >= drempel is.
+def _negative_run_end(slots: list[dict[str, Any]]) -> str | None:
+    """Start-ts van het eerste slot (vanaf nu) waarop de EPEX weer >= drempel is.
 
     Dus: tot wanneer de huidige negatieve reeks duurt. `None` als de data niet
-    ver genoeg reikt om het einde te zien.
+    ver genoeg reikt om het einde te zien. Loopt op de resolutie van de
+    leverancier, dus bij een kwartier-leverancier op kwartierprecisie.
     """
-    idx = _now_index(hourly)
+    idx = slot_index_now(slots)
     if idx is None:
         return None
-    for h in hourly[idx:]:
-        epex = h.get("epex")
+    for s in slots[idx:]:
+        epex = s.get("epex")
         if epex is None or epex >= NEGATIVE_PRICE_THRESHOLD:
-            return h.get("start_ts")
+            return s.get("start_ts")
     return None
 
 
-def _next_negative_start(hourly: list[dict[str, Any]]) -> str | None:
+def _next_negative_start(slots: list[dict[str, Any]]) -> str | None:
     """Start-ts van de eerstvolgende negatieve EPEX-periode (vanaf nu)."""
-    idx = _now_index(hourly)
-    start = idx if idx is not None else 0
-    for h in hourly[start:]:
-        epex = h.get("epex")
+    idx = slot_index_now(slots)
+    for s in slots[idx if idx is not None else 0 :]:
+        epex = s.get("epex")
         if epex is not None and epex < NEGATIVE_PRICE_THRESHOLD:
-            return h.get("start_ts")
+            return s.get("start_ts")
     return None
 
 
@@ -113,7 +102,7 @@ class NegativePriceBinarySensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         cur = data.get("current")
-        hourly = data.get("hourly", [])
+        slots = data.get("slots", [])
         attrs: dict[str, Any] = {
             "epex_now": self._epex_now(),
             "total_now": (
@@ -124,8 +113,8 @@ class NegativePriceBinarySensor(
         }
         if self.is_on:
             # Tot wanneer moeten de panelen uit blijven?
-            attrs["negative_until"] = _negative_run_end(hourly)
+            attrs["negative_until"] = _negative_run_end(slots)
         else:
             # Wanneer begint de volgende negatieve periode (planning vooruit)?
-            attrs["next_negative_start"] = _next_negative_start(hourly)
+            attrs["next_negative_start"] = _next_negative_start(slots)
         return attrs

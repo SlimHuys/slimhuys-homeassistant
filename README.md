@@ -66,6 +66,36 @@ attribuut `valid: true` zodra de hele dag binnen is. `prijzen_vandaag_kwartier` 
 sinds v1.4.0 een alias van `prijzen_vandaag` (die levert zelf al de native
 resolutie) en blijft bestaan zodat bestaande kaarten niet breken.
 
+### Twee binary sensors voor negatieve prijzen
+
+| Binary sensor | `on` wanneer | Waarvoor |
+|---|---|---|
+| `binary_sensor.negatieve_prijs_nu` | kale EPEX < 0 | terugleveren kost geld → omvormer dimmen/uit |
+| `binary_sensor.negatieve_all_in_prijs_nu` | all-in prijs < 0 | je wórdt betaald om te verbruiken → laadpaal, boiler en warmtepomp vol open |
+
+Het verschil zit in de belastingcomponent: de all-in prijs is EPEX + inkoop-
+marge + energiebelasting + opslag + btw. Die belasting is een flinke bodem,
+dus in NL gaat de all-in sensor zelden aan terwijl de EPEX regelmatig onder
+nul duikt. Wil je niet pas onder nul schakelen maar al bij "spotgoedkoop", zet
+dan `NEGATIVE_ALL_IN_PRICE_THRESHOLD` in `const.py` op bijv. `0.05`; voor de
+EPEX-variant doet `NEGATIVE_PRICE_THRESHOLD` hetzelfde.
+
+Beide hebben dezelfde attributen: `epex_now`, `total_now`, `threshold`,
+`supplier`, plus `negative_until` als hij aan staat en `next_negative_start`
+als hij uit staat — beide op de resolutie van je leverancier.
+
+```yaml
+automation:
+  - alias: Auto laden bij negatieve all-in prijs
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.negatieve_all_in_prijs_nu
+        to: "on"
+    action:
+      - service: switch.turn_on
+        target: {entity_id: switch.laadpaal}
+```
+
 Plus **één service** voor terug-push naar SlimHuys:
 
 ```yaml

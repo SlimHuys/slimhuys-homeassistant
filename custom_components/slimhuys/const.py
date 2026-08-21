@@ -75,7 +75,11 @@ DEFAULT_PULL_PROBE_AT_SETUP = True
 SSE_RECONNECT_INITIAL_DELAY = 1.0
 SSE_RECONNECT_MAX_DELAY = 30.0
 SSE_HEARTBEAT_TIMEOUT = 45  # 3× server-ping-window van 15s — robuust tegen jitter
-POLL_FALLBACK_INTERVAL = 5.0
+# Polling-fallback tijdens SSE-uitval: begint op 5s en verdubbelt zolang de
+# stream down blijft, tot maximaal 60s. Een storing van uren mag niet
+# eindeloos elke 5 seconden tegen de API blijven aankloppen.
+POLL_FALLBACK_INITIAL_INTERVAL = 5.0
+POLL_FALLBACK_MAX_INTERVAL = 60.0
 
 # Sensor unique-id-suffixes voor pull-mode entities (stabiel over restarts)
 LIVE_SUFFIX_ACTIVE_POWER = "live_active_power"

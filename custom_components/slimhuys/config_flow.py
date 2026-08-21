@@ -8,6 +8,11 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api import SlimHuysApiError, SlimHuysAuthError, SlimHuysClient
 from .const import (
@@ -250,7 +255,10 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_API_KEY): str,
+                    # API-key is een secret: masker 'm in de UI i.p.v. plain text.
+                    vol.Required(CONF_API_KEY): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                     vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
                 }
             ),
@@ -414,8 +422,9 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class SlimHuysOptionsFlow(config_entries.OptionsFlow):
     """Wijzig leverancier + P1-mode achteraf.
 
-    HA 2024.12+ stelt self.config_entry automatisch in — geen __init__
+    HA 2024.11+ stelt self.config_entry automatisch in — geen __init__
     nodig (en de oude pattern conflicteert met de nieuwe property).
+    Vandaar de minimum-versie in hacs.json.
     """
 
     def __init__(self) -> None:

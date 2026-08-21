@@ -12,7 +12,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .api import SlimHuysApiError, SlimHuysAuthError, SlimHuysClient
 from .const import (
     DOMAIN,
-    POLL_FALLBACK_INTERVAL,
+    POLL_FALLBACK_INITIAL_INTERVAL,
+    POLL_FALLBACK_MAX_INTERVAL,
     SSE_RECONNECT_INITIAL_DELAY,
     SSE_RECONNECT_MAX_DELAY,
 )
@@ -157,12 +158,18 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
         weer een event ontvangt, wordt `_consecutive_failures` ge-reset
         naar 0 en valt de fallback automatisch stil. Geen permanente
         dubbel-fetch tijdens stabiele perioden.
+
+        Zolang de stream down blijft loopt het poll-interval exponentieel
+        op van 5s naar 60s — een storing die uren duurt hamert zo niet
+        eindeloos op de API. Bij herstel valt het interval terug naar 5s.
         """
+        interval = POLL_FALLBACK_INITIAL_INTERVAL
         while True:
             try:
-                await asyncio.sleep(POLL_FALLBACK_INTERVAL)
+                await asyncio.sleep(interval)
                 if self._consecutive_failures < 2:
                     # SSE draait stabiel of probeert nog z'n eerste connect
+                    interval = POLL_FALLBACK_INITIAL_INTERVAL
                     continue
                 snapshot = await self._client.current_usage()
                 live = (snapshot or {}).get("live") or {}
@@ -171,6 +178,8 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
                     self._handle_event("reading", live)
                 if water:
                     self._handle_event("water-reading", water)
+                # Stream ligt er nóg uit — volgende poll verder weg zetten
+                interval = min(interval * 2, POLL_FALLBACK_MAX_INTERVAL)
             except asyncio.CancelledError:
                 raise
             except SlimHuysAuthError:
@@ -178,6 +187,7 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
                 pass
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Polling-fallback faalde: %s", err)
+                interval = min(interval * 2, POLL_FALLBACK_MAX_INTERVAL)
 
     def _handle_event(self, event_name: str, payload: dict[str, Any]) -> None:
         """Map event-name → state-key, push naar listeners."""

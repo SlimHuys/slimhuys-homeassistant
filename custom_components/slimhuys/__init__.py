@@ -247,8 +247,8 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     consumption = _get(CONF_P1_CONSUMPTION)
     delivery = _get(CONF_P1_DELIVERY)
     power = _get(CONF_P1_POWER)
-    # Clamp ook bestaande entries: wie voor v1.7.0 een interval < MIN_P1_INTERVAL
-    # had staan, pusht na de update op de nieuwe ondergrens.
+    # Clamp: een entry kan een waarde buiten het schema-bereik bevatten
+    # (handmatig bewerkte .storage, of een oudere grens dan de huidige).
     interval = max(
         MIN_P1_INTERVAL,
         min(MAX_P1_INTERVAL, int(_get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))),

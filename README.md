@@ -150,17 +150,17 @@ en biedt dropdowns aan:
   daarvoor altijd op 0 in de push. Werd bij jou al een `_delivery`- of
   `_teruglevering`-sensor gevonden, dan staat die alvast voorgeselecteerd.
 
-Plus een push-interval (5–300 seconden, default 30s). Sinds v0.3.0 is de
+Plus een push-interval (1–300 seconden, default 30s). Sinds v0.3.0 is de
 push **event-driven**: zodra je DSMR-meter een nieuwe waarde publiceert
 gaat 'ie meteen naar SlimHuys (met throttling op het ingestelde interval).
 
 **Optionele velden** (3-fase + gas) verschijnen automatisch onderin de
 wizard als ze in je HA-instance bestaan.
 
-> **Ondergrens is 5 seconden** sinds v1.7.0 (was 1s). DSMR-meters publiceren
-> van nature elke ~1s, maar de winst daarvan is klein tegenover 12 requests
-> per minuut per instance. Stond bij jou 1s ingesteld, dan schuift dat na de
-> update automatisch naar 5s — je hoeft niets te wijzigen.
+> **1-seconde push** blijft mogelijk. DSMR-meters publiceren van nature elke
+> ~1s; de SlimHuys-API rate-limit is 600/min/key (= 10/s) dus 1Hz uit één
+> instance is comfortabel, en nodig als je automations op live vermogen
+> schakelen. (v1.7.0 zette de ondergrens kort op 5s; v1.7.1 draait dat terug.)
 
 > **Bij API-storing** loopt het interval trapsgewijs op (verdubbelend, tot
 > 300s) en springt het terug zodra een push weer slaagt. Je meter blijft

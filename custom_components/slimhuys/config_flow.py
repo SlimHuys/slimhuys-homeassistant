@@ -564,8 +564,8 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         current_p1_consumption = get(CONF_P1_CONSUMPTION)
         current_p1_delivery = get(CONF_P1_DELIVERY)
         current_p1_power = get(CONF_P1_POWER)
-        # Clamp de prefill: een entry van vóór v1.7.0 kan 1s bevatten, en dan
-        # zou het formulier op zijn eigen default afketsen bij opslaan.
+        # Clamp de prefill op het schema-bereik, anders ketst het formulier
+        # af op zijn eigen ingevulde waarde bij opslaan.
         current_p1_interval = max(
             MIN_P1_INTERVAL,
             min(MAX_P1_INTERVAL, int(get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))),

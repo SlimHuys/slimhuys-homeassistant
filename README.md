@@ -146,6 +146,9 @@ en biedt dropdowns aan:
 - Cumulatief verbruik (kWh)
 - Cumulatieve teruglevering (kWh)
 - Huidig vermogen (W of kW — wordt automatisch geconverteerd)
+- Huidige teruglevering (W of kW, optioneel) — nieuw in v1.7.0; stond
+  daarvoor altijd op 0 in de push. Werd bij jou al een `_delivery`- of
+  `_teruglevering`-sensor gevonden, dan staat die alvast voorgeselecteerd.
 
 Plus een push-interval (5–300 seconden, default 30s). Sinds v0.3.0 is de
 push **event-driven**: zodra je DSMR-meter een nieuwe waarde publiceert

@@ -31,6 +31,7 @@ from .const import (
     CONF_P1_POWER_L1,
     CONF_P1_POWER_L2,
     CONF_P1_POWER_L3,
+    CONF_P1_POWER_RETURNED,
     CONF_P1_POWER_RETURNED_L1,
     CONF_P1_POWER_RETURNED_L2,
     CONF_P1_POWER_RETURNED_L3,
@@ -149,13 +150,30 @@ def _suggest_gas(candidates: list[str]) -> str | None:
     )
 
 
+def _suggest_power_returned(candidates: list[str]) -> str | None:
+    """Pak de totaal-teruglevering, niet een fase-variant.
+
+    DSMR noemt dit 'delivery' (wat je aan het net levert); HomeWizard en
+    Tibber gebruiken 'export' of 'teruglevering'.
+    """
+    needles = ("delivery", "teruglevering", "returned", "export")
+    return next(
+        (
+            s for s in candidates
+            if any(n in s.lower() for n in needles)
+            and not any(f"_l{p}" in s.lower() for p in "123")
+        ),
+        None,
+    )
+
+
 def _add_optional_phase_fields(
     schema_dict: dict,
     voltage_choices: dict, current_choices: dict, power_choices: dict, gas_choices: dict,
     voltage_sensors: list, current_sensors: list, power_sensors: list, gas_sensors: list,
     *, defaults: dict | None = None,
 ) -> None:
-    """Voegt de tien optionele 3-fase + gas-dropdowns toe aan een schema-dict.
+    """Voegt de optionele 3-fase-, teruglevering- en gas-dropdowns toe.
 
     Gedeeld tussen Config- en OptionsFlow. `defaults` staat toe om bestaande
     waarden uit een bewaarde entry voor te selecteren — als er geen `defaults`
@@ -180,7 +198,8 @@ def _add_optional_phase_fields(
         if key in (CONF_P1_CURRENT_L1, CONF_P1_CURRENT_L2, CONF_P1_CURRENT_L3):
             return current_choices
         if key in (CONF_P1_POWER_L1, CONF_P1_POWER_L2, CONF_P1_POWER_L3,
-                   CONF_P1_POWER_RETURNED_L1, CONF_P1_POWER_RETURNED_L2, CONF_P1_POWER_RETURNED_L3):
+                   CONF_P1_POWER_RETURNED_L1, CONF_P1_POWER_RETURNED_L2, CONF_P1_POWER_RETURNED_L3,
+                   CONF_P1_POWER_RETURNED):
             return power_choices
         if key == CONF_P1_GAS:
             return gas_choices
@@ -206,6 +225,15 @@ def _add_optional_phase_fields(
             continue
         default = _value_for(key, candidates, lambda c=candidates, p=phase: _suggest_phase(c, p))
         schema_dict[vol.Optional(key, default=default)] = vol.In({**choices, "": "—"})
+
+    if power_choices:
+        default = _value_for(
+            CONF_P1_POWER_RETURNED, power_sensors,
+            lambda c=power_sensors: _suggest_power_returned(c),
+        )
+        schema_dict[vol.Optional(CONF_P1_POWER_RETURNED, default=default)] = vol.In(
+            {**power_choices, "": "—"}
+        )
 
     if gas_choices:
         default = _value_for(CONF_P1_GAS, gas_sensors, lambda c=gas_sensors: _suggest_gas(c))
@@ -350,7 +378,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_P1_CURRENT_L1, CONF_P1_CURRENT_L2, CONF_P1_CURRENT_L3,
                 CONF_P1_POWER_L1, CONF_P1_POWER_L2, CONF_P1_POWER_L3,
                 CONF_P1_POWER_RETURNED_L1, CONF_P1_POWER_RETURNED_L2, CONF_P1_POWER_RETURNED_L3,
-                CONF_P1_GAS,
+                CONF_P1_POWER_RETURNED, CONF_P1_GAS,
             ):
                 if user_input.get(opt_key):
                     data[opt_key] = user_input[opt_key]
@@ -559,7 +587,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
                     CONF_P1_CURRENT_L1, CONF_P1_CURRENT_L2, CONF_P1_CURRENT_L3,
                     CONF_P1_POWER_L1, CONF_P1_POWER_L2, CONF_P1_POWER_L3,
                     CONF_P1_POWER_RETURNED_L1, CONF_P1_POWER_RETURNED_L2, CONF_P1_POWER_RETURNED_L3,
-                    CONF_P1_GAS,
+                    CONF_P1_POWER_RETURNED, CONF_P1_GAS,
                 ) if (v := get(k))
             }
             _add_optional_phase_fields(

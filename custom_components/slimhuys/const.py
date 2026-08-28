@@ -57,6 +57,10 @@ CONF_P1_POWER_L3 = "p1_power_l3_sensor"
 CONF_P1_POWER_RETURNED_L1 = "p1_power_returned_l1_sensor"
 CONF_P1_POWER_RETURNED_L2 = "p1_power_returned_l2_sensor"
 CONF_P1_POWER_RETURNED_L3 = "p1_power_returned_l3_sensor"
+# Totale teruglevering (OBIS 1-0:2.7.0), het tegenhanger-register van
+# CONF_P1_POWER. Tot v1.7.0 ontbrak deze en ging active_power_returned_w
+# hardcoded als 0 mee in elke push.
+CONF_P1_POWER_RETURNED = "p1_power_returned_sensor"
 CONF_P1_GAS = "p1_gas_sensor"
 
 # P1-mode (v0.5.0+): drie wederzijds-exclusieve P1-bronnen per entry.

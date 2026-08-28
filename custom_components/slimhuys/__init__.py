@@ -31,6 +31,7 @@ from .const import (
     CONF_P1_POWER_L1,
     CONF_P1_POWER_L2,
     CONF_P1_POWER_L3,
+    CONF_P1_POWER_RETURNED,
     CONF_P1_POWER_RETURNED_L1,
     CONF_P1_POWER_RETURNED_L2,
     CONF_P1_POWER_RETURNED_L3,
@@ -265,6 +266,7 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     power_l1 = _get(CONF_P1_POWER_L1)
     power_l2 = _get(CONF_P1_POWER_L2)
     power_l3 = _get(CONF_P1_POWER_L3)
+    power_returned = _get(CONF_P1_POWER_RETURNED)
     power_returned_l1 = _get(CONF_P1_POWER_RETURNED_L1)
     power_returned_l2 = _get(CONF_P1_POWER_RETURNED_L2)
     power_returned_l3 = _get(CONF_P1_POWER_RETURNED_L3)
@@ -327,7 +329,9 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             "consumption_kwh_total": c_total,
             "delivered_kwh_total": d_total,
             "active_power_w": p_w,
-            "active_power_returned_w": 0,
+            # Tegenhanger-register van active_power_w. Niet geconfigureerd
+            # (of even onleesbaar) -> 0, zoals het vóór v1.7.0 altijd ging.
+            "active_power_returned_w": _read_power_w(power_returned) or 0,
         }
         # Optionele velden — alleen toevoegen als de sensor configured is
         # én een leesbare waarde heeft. Anders leveren we niets op die key.
@@ -397,7 +401,7 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         voltage_l1, voltage_l2, voltage_l3,
         current_l1, current_l2, current_l3,
         power_l1, power_l2, power_l3,
-        power_returned_l1, power_returned_l2, power_returned_l3,
+        power_returned, power_returned_l1, power_returned_l2, power_returned_l3,
         gas,
     ) if s]
 

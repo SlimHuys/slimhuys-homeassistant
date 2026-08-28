@@ -1,6 +1,6 @@
 # SlimHuys — Home Assistant integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-blue.svg)](https://github.com/hacs/integration)
 
 Home Assistant-integratie voor [SlimHuys.nl](https://slimhuys.nl) — dynamische
 stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
@@ -110,13 +110,14 @@ data:
 
 ### Via HACS (aanbevolen)
 
-1. Open HACS → 3-puntjes menu → **Custom repositories**
-2. URL: `https://github.com/SlimHuys/slimhuys-homeassistant`
-3. Categorie: **Integration**
-4. **Add** → zoek "SlimHuys" → **Download**
-5. Herstart Home Assistant
-6. **Settings → Devices & Services → + Add Integration → SlimHuys**
-7. Plak je API-key — die maak je aan op [slimhuys.nl/app/account?tab=api](https://slimhuys.nl/app/account?tab=api)
+SlimHuys staat in de standaard-HACS-catalogus, dus een custom repository
+toevoegen hoeft niet meer.
+
+1. Open HACS → **Integraties**
+2. Zoek "SlimHuys" → **Download**
+3. Herstart Home Assistant
+4. **Settings → Devices & Services → + Add Integration → SlimHuys**
+5. Plak je API-key — die maak je aan op [slimhuys.nl/app/account?tab=api](https://slimhuys.nl/app/account?tab=api)
 
 ### Handmatig
 

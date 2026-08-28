@@ -46,6 +46,8 @@ from .const import (
     DEFAULT_PULL_PROBE_AT_SETUP,
     DEFAULT_SUPPLIER,
     DOMAIN,
+    MAX_P1_INTERVAL,
+    MIN_P1_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
     P1_MODE_PUSH,
@@ -384,7 +386,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_P1_DELIVERY, default=default_delivery or vol.UNDEFINED): vol.In(energy_choices),
                 vol.Required(CONF_P1_POWER, default=default_power or vol.UNDEFINED): vol.In(power_choices),
                 vol.Optional(CONF_P1_INTERVAL, default=DEFAULT_P1_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=300)
+                    vol.Coerce(int), vol.Range(min=MIN_P1_INTERVAL, max=MAX_P1_INTERVAL)
                 ),
             })
             _add_optional_phase_fields(
@@ -534,7 +536,12 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         current_p1_consumption = get(CONF_P1_CONSUMPTION)
         current_p1_delivery = get(CONF_P1_DELIVERY)
         current_p1_power = get(CONF_P1_POWER)
-        current_p1_interval = int(get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))
+        # Clamp de prefill: een entry van vóór v1.7.0 kan 1s bevatten, en dan
+        # zou het formulier op zijn eigen default afketsen bij opslaan.
+        current_p1_interval = max(
+            MIN_P1_INTERVAL,
+            min(MAX_P1_INTERVAL, int(get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))),
+        )
 
         schema_dict: dict[Any, Any] = {}
         if energy_choices and power_choices:
@@ -543,7 +550,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_P1_DELIVERY, default=safe_default(current_p1_delivery, energy_choices)): vol.In(energy_choices),
                 vol.Required(CONF_P1_POWER, default=safe_default(current_p1_power, power_choices)): vol.In(power_choices),
                 vol.Optional(CONF_P1_INTERVAL, default=current_p1_interval): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=300)
+                    vol.Coerce(int), vol.Range(min=MIN_P1_INTERVAL, max=MAX_P1_INTERVAL)
                 ),
             })
             optional_defaults = {

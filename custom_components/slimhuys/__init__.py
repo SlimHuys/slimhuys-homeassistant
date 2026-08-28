@@ -46,9 +46,13 @@ from .const import (
     DEFAULT_PULL_PROBE_AT_SETUP,
     DEFAULT_SUPPLIER,
     DOMAIN,
+    MAX_P1_INTERVAL,
+    MIN_P1_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
     P1_MODE_PUSH,
+    PUSH_BACKOFF_MAX_FAILURES,
+    PUSH_BACKOFF_MAX_INTERVAL,
     SERVICE_PUSH_READING,
 )
 from .coordinator import SlimHuysCoordinator
@@ -242,7 +246,12 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     consumption = _get(CONF_P1_CONSUMPTION)
     delivery = _get(CONF_P1_DELIVERY)
     power = _get(CONF_P1_POWER)
-    interval = max(1, min(300, int(_get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))))
+    # Clamp ook bestaande entries: wie voor v1.7.0 een interval < MIN_P1_INTERVAL
+    # had staan, pusht na de update op de nieuwe ondergrens.
+    interval = max(
+        MIN_P1_INTERVAL,
+        min(MAX_P1_INTERVAL, int(_get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL))),
+    )
 
     if not (enabled and consumption and delivery and power):
         return
@@ -263,7 +272,16 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     state = hass.data[DOMAIN][entry.entry_id]
     client: SlimHuysClient = state["client"]
-    last_push_at = [0.0]  # mutable closure-state, monotonic seconds
+    # Mutable closure-state. last_attempt telt vanaf de póging, niet vanaf de
+    # geslaagde push: anders consumeert een mislukte call geen window en blijft
+    # elke state-change direct opnieuw vuren.
+    push_state = {"last_attempt": 0.0, "failures": 0, "in_flight": False}
+
+    def _current_interval() -> float:
+        """Configured interval, verdubbeld per opeenvolgende fout."""
+        if not push_state["failures"]:
+            return float(interval)
+        return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
 
     def _read_float(entity_id: str | None) -> float | None:
         if not entity_id:
@@ -294,6 +312,10 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     async def _do_push(_now=None) -> None:
         state["p1_pending_unsub"] = None
+        if push_state["in_flight"]:
+            # Een DSMR-telegram werkt alle entities in dezelfde tick bij; zonder
+            # deze guard start elk van die events een eigen POST.
+            return
         c_total = _read_float(consumption)
         d_total = _read_float(delivery)
         p_w = _read_power_w(power)
@@ -332,25 +354,42 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             if v is not None:
                 payload[key] = v
 
+        push_state["in_flight"] = True
+        push_state["last_attempt"] = monotonic()
         try:
             await client.push_readings([payload])
-            last_push_at[0] = monotonic()
+            if push_state["failures"]:
+                _LOGGER.debug("SlimHuys auto-push hersteld na %d fouten", push_state["failures"])
+                push_state["failures"] = 0
         except SlimHuysApiError as err:
-            _LOGGER.debug("SlimHuys auto-push faalde (silent): %s", err)
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.debug(
+                "SlimHuys auto-push faalde (silent, poging %d, volgende over %.0fs): %s",
+                push_state["failures"], _current_interval(), err,
+            )
         except Exception as err:  # noqa: BLE001
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
             _LOGGER.warning("Onverwachte fout in P1-push: %s", err)
+        finally:
+            push_state["in_flight"] = False
 
     @callback
     def _on_state_change(_event) -> None:
-        elapsed = monotonic() - last_push_at[0]
-        if elapsed >= interval:
-            # Genoeg tijd verstreken sinds laatste push — flush direct.
+        if push_state["in_flight"] or state.get("p1_pending_unsub") is not None:
+            # Er loopt al een push of er staat er al één gepland voor dit
+            # window; de meter stuurt binnen een seconde toch een nieuw
+            # telegram, dus dit event laten vallen kost niets.
+            return
+        window = _current_interval()
+        elapsed = monotonic() - push_state["last_attempt"]
+        if elapsed >= window:
+            # Genoeg tijd verstreken sinds laatste poging — flush direct.
             hass.async_create_task(_do_push())
-        elif state.get("p1_pending_unsub") is None:
+        else:
             # Te kort geleden — schedule één push voor het einde van het
-            # interval-window. Verdere state-changes binnen dit window
-            # worden gemerged (de _do_push leest gewoon de nieuwste states).
-            delay = max(0.1, interval - elapsed)
+            # window. Verdere state-changes binnen dit window worden gemerged
+            # (de _do_push leest gewoon de nieuwste states).
+            delay = max(0.1, window - elapsed)
             state["p1_pending_unsub"] = async_call_later(hass, delay, _do_push)
 
     sensors_to_watch = [s for s in (

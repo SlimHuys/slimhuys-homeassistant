@@ -130,3 +130,18 @@ DEFAULT_SUPPLIER = "frank-energie"
 # Push every 30 seconds by default — voldoende real-time zonder
 # de SlimHuys API of Postmark-rate-limits te raken.
 DEFAULT_P1_INTERVAL = 30
+
+# Ondergrens van het push-interval. Stond op 1s: één instance haalde dan
+# 60 req/min tegen een limiet van 600/min per key. Technisch haalbaar, maar
+# de spreiding tussen min 1 en default 30 was zinloos groot — 5s is nog
+# ruim live genoeg voor een dashboard.
+MIN_P1_INTERVAL = 5
+MAX_P1_INTERVAL = 300
+
+# Backoff bij opeenvolgende push-fouten, zelfde patroon als de SSE-fallback
+# hierboven: verdubbel het interval per mislukte poging, tot maximaal 300s,
+# en reset zodra er weer één slaagt. Zonder dit bleef elke state-change een
+# directe push triggeren zolang de API faalde — precies wanneer die de
+# minste extra requests kan hebben.
+PUSH_BACKOFF_MAX_INTERVAL = 300.0
+PUSH_BACKOFF_MAX_FAILURES = 8

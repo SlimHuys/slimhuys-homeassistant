@@ -202,7 +202,6 @@ class _BaseSensor(CoordinatorEntity[SlimHuysCoordinator], SensorEntity):
 class CurrentPriceSensor(_BaseSensor):
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_suggested_display_precision = 4
     _attr_icon = "mdi:flash"
 
@@ -443,9 +442,15 @@ class PricesTodaySensor(_BaseSensor):
     waarden, uur-leveranciers 24.
     """
 
+    # De dag-arrays gaan niet naar de recorder-DB: 96 kwartieren × prices +
+    # raw_* + raw_*_epex is ~20 kB per state en dat is boven de 16 kB-limiet.
+    # Recorder gooide dan *alle* attributen weg — inclusief
+    # unit_of_measurement, waardoor long-term statistics stukliepen op
+    # "unit (None) cannot be converted to €/kWh". Frontend/templates zien de
+    # attributen gewoon; alleen de historie slaat ze niet op.
+    _unrecorded_attributes = frozenset({"prices", "raw_today", "raw_today_epex"})
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_suggested_display_precision = 4
     _attr_icon = "mdi:chart-bar"
 
@@ -474,6 +479,7 @@ class PricesTodaySensor(_BaseSensor):
 class PricesTomorrowSensor(_BaseSensor):
     """Prijzen morgen — state = daggemiddelde, None vóór EPEX-publicatie (~14:00)."""
 
+    _unrecorded_attributes = frozenset({"prices", "raw_tomorrow", "raw_tomorrow_epex"})
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4
@@ -526,7 +532,6 @@ class PricesTodayQuarterSensor(PricesTodaySensor):
     blijft alleen bestaan zodat kaarten die 'm noemen niet breken.
     """
 
-    _attr_device_class = None
     _attr_icon = "mdi:chart-timeline-variant"
 
     def __init__(self, coordinator, entry, supplier):
@@ -566,7 +571,6 @@ class FeedinCurrentSensor(_BaseSensor):
 
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_suggested_display_precision = 4
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -605,9 +609,9 @@ class FeedinCurrentSensor(_BaseSensor):
 class FeedinTodaySensor(_BaseSensor):
     """Teruglevering vandaag — state = huidige rate, attrs = array + raw_today."""
 
+    _unrecorded_attributes = frozenset({"prices", "raw_today", "raw_today_epex"})
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_suggested_display_precision = 4
     _attr_icon = "mdi:solar-power-variant"
 
@@ -640,6 +644,7 @@ class FeedinTodaySensor(_BaseSensor):
 class FeedinTomorrowSensor(_BaseSensor):
     """Teruglevering morgen — state = daggemiddelde, None vóór EPEX-publicatie."""
 
+    _unrecorded_attributes = frozenset({"prices", "raw_tomorrow", "raw_tomorrow_epex"})
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4

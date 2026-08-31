@@ -51,6 +51,13 @@ attributes:
   max: 0.46
 ```
 
+> **Niet in de historie.** De dag-arrays (`prices`, `raw_today`,
+> `raw_today_epex` en hun `*_tomorrow`-varianten) worden sinds v1.7.2 niet meer
+> door de recorder opgeslagen: 96 kwartieren zijn ~20 kB per state, ruim boven
+> de 16 kB-limiet van HA, waardoor de recorder álle attributen liet vallen en
+> de long-term statistics stukliepen. Kaarten en templates lezen de attributen
+> gewoon van de live state; alleen `history`/`recorder` kent ze niet meer.
+
 **Prijzen volgen de resolutie van je leverancier.** Rekent die per kwartier af
 (Zonneplan, Tibber, Frank, easyEnergy, Coolblue …), dan krijg je 96 waarden per
 dag; rekent die per uur af (ANWB, Budget …), dan 24. De integratie middelt

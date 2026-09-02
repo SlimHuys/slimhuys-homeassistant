@@ -159,12 +159,14 @@ CONF_BATTERY_MODEL = "battery_model"
 CONF_BATTERY_EXTERNAL_ID = "battery_external_id"
 CONF_BATTERY_CAPACITY = "battery_capacity_kwh"
 
-# Een omvormer publiceert veel trager dan een 1 Hz-P1-bridge (SEMS pollt de
-# GoodWe-cloud, Deye-modbus haalt ~5s). Ondergrens daarom 5s in plaats van de
-# 1s van MIN_P1_INTERVAL: sneller pushen levert alleen duplicaten op die de
-# API toch op (battery_id, timestamp_utc) wegupsert.
+# Ondergrens 1s, gelijk aan MIN_P1_INTERVAL. In v1.9.x stond dit op 5 met het
+# argument dat een omvormer toch trager publiceert — maar dat is een reden om
+# er geen 1 te kíézen, geen reden om het te verbieden. Wie op batterij-
+# vermogen schakelt heeft die resolutie nodig, en de throttle (niet de
+# ondergrens) is wat de API beschermt. Duplicaten upsert de API weg op
+# (battery_id, timestamp_utc).
 DEFAULT_BATTERY_INTERVAL = 30
-MIN_BATTERY_INTERVAL = 5
+MIN_BATTERY_INTERVAL = 1
 MAX_BATTERY_INTERVAL = 300
 
 # Sensor unique-id-suffixes voor pull-mode batterij-entities. Per batterij

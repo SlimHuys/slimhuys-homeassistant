@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Any
 
@@ -12,7 +12,11 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 
 from .api import SlimHuysApiError, SlimHuysClient
 from .const import (
@@ -189,6 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "p1_pending_unsub": None,
         "battery_unsub": None,
         "battery_pending_unsub": None,
+        "battery_timer_unsub": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -253,6 +258,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["battery_unsub"]()
     if state.get("battery_pending_unsub"):
         state["battery_pending_unsub"]()
+    if state.get("battery_timer_unsub"):
+        state["battery_timer_unsub"]()
     live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
     if live is not None:
         await live.async_stop()
@@ -510,6 +517,19 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             return float(interval)
         return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
 
+    def _elapsed() -> float:
+        """Tijd sinds de vorige poging; `inf` als er nog geen is geweest.
+
+        `last_attempt` begint op 0.0 en `monotonic()` telt niet vanaf een vast
+        nulpunt — vlak na een herstart is `monotonic() - 0.0` klein genoeg om
+        als "zojuist gepusht" te lezen, waardoor de eerste push een heel
+        interval bleef liggen. Expliciet op "nog nooit" testen in plaats van
+        op een klok-epoch vertrouwen.
+        """
+        if not push_state["last_attempt"]:
+            return float("inf")
+        return monotonic() - push_state["last_attempt"]
+
     def _read_float(entity_id: str | None) -> float | None:
         if not entity_id:
             return None
@@ -630,12 +650,32 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         ):
             return
         window = _current_interval()
-        elapsed = monotonic() - push_state["last_attempt"]
+        elapsed = _elapsed()
         if elapsed >= window:
             hass.async_create_task(_do_push())
         else:
             delay = max(0.1, window - elapsed)
             state["battery_pending_unsub"] = async_call_later(hass, delay, _do_push)
+
+    async def _tick(_now) -> None:
+        """Hartslag — push ook als er niets veranderd is.
+
+        Anders dan bij P1 is state-change alleen niet genoeg. Een DSMR-meter
+        publiceert ~1 Hz en verandert dus continu; een batterij die stilstaat
+        op 64% en 0 W levert uren geen enkel state-change-event op. Zonder
+        deze tick zou SlimHuys die batterij als `stale` en daarna
+        `disconnected` zien, terwijl 'ie gewoon idle is — en "idle op 64%" is
+        zelf ook informatie.
+
+        De throttle-check blijft gelden, zodat een tick vlak na een
+        state-change-push geen dubbele POST doet, en de backoff bij API-fouten
+        gerespecteerd wordt.
+        """
+        if push_state["in_flight"] or push_state["stopped"]:
+            return
+        if _elapsed() < _current_interval():
+            return
+        await _do_push()
 
     sensors_to_watch = [e for e in (
         soc, power, charge_power, discharge_power,
@@ -644,6 +684,9 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     state["battery_unsub"] = async_track_state_change_event(
         hass, sensors_to_watch, _on_state_change
+    )
+    state["battery_timer_unsub"] = async_track_time_interval(
+        hass, _tick, timedelta(seconds=interval)
     )
 
 

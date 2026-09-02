@@ -110,9 +110,16 @@ je kunt elke sensor die je hebt ook echt aanwijzen.
 > adopteert een bestaande batterij zonder, dus je verliest geen historie als
 > je 'm later alsnog invult.
 
-Standaard push-interval is 30 seconden, ondergrens 5. Sneller heeft geen zin:
-een omvormer publiceert veel trager dan een 1 Hz-P1-bridge, en de API upsert
-dubbele metingen toch weg op `(batterij, tijdstip)`.
+Standaard push-interval is 30 seconden, ondergrens 1. Zet 'm laag als je op
+batterijvermogen wilt schakelen; de meeste omvormers publiceren zelf trager,
+dus dan bepaalt je bron het tempo en niet dit getal.
+
+De push gaat door zodra een van je gekozen entiteiten verandert, én sowieso
+elk interval — ook als er niets veranderd is. Dat tweede is nodig omdat een
+batterij die stilstaat op 64% en 0 W urenlang geen state-change-event
+oplevert; zonder hartslag zou SlimHuys 'm als `stale` en daarna
+`disconnected` zien terwijl 'ie gewoon idle is. "Idle op 64%" is zelf ook
+informatie.
 
 In **pull**-mode krijg je de batterij ook terúg als HA-entiteiten (laadtoestand,
 vermogen, status, inhoud, temperatuur) — elke batterij als eigen apparaat.

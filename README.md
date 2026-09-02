@@ -27,6 +27,38 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 | `sensor.teruglevering_vandaag` | EUR/kWh + `raw_today` attr | `0.071` |
 | `sensor.teruglevering_morgen` | EUR/kWh + `raw_tomorrow` attr | `0.084` of `unknown` |
 
+**En negen dagsensoren met je eigen verbruik en kosten** (sinds v1.8.0):
+
+| Sensor | Eenheid | Voorbeeld |
+|---|---|---|
+| `sensor.kosten_vandaag` | EUR | `2.34` |
+| `sensor.netto_kosten_vandaag` | EUR | `3.53` |
+| `sensor.opbrengst_vandaag` | EUR | `0.42` |
+| `sensor.gaskosten_vandaag` | EUR | `1.61` |
+| `sensor.verbruik_vandaag` | kWh | `8.41` |
+| `sensor.teruggeleverd_vandaag` | kWh | `3.10` |
+| `sensor.opwek_vandaag` | kWh | `5.90` |
+| `sensor.eigen_verbruik_vandaag` | kWh | `2.80` |
+| `sensor.gasverbruik_vandaag` | m³ | `1.200` |
+
+Deze komen uit `GET /v1/me/usage/current` en worden elke 5 minuten
+ververst — de API rekent het dagtotaal per kwartier af, dus vaker pollen
+levert niets nieuws op. Ze werken in **elke** P1-mode (`none`, `push` én
+`pull`): ook als je zelf je P1 naar SlimHuys pusht, krijg je je dagrekening
+terug in HA.
+
+`netto_kosten_vandaag` = stroom + gas − teruglevering. `kosten_vandaag`
+is alleen de afname van stroom. De gassensoren zijn `unavailable` op een
+huis zonder gasaansluiting (of zolang SlimHuys geen gastarief kent voor je
+contract) — `netto_kosten_vandaag` rekent dan gewoon zonder gas verder.
+
+> **Waarom `state_class: total` met `last_reset`, en geen
+> `total_increasing`?** Deze waarden vallen om middernacht terug naar 0.
+> Zonder `last_reset` leest de recorder die terugval als een meter-rollover
+> en telt de dagsprong bij het jaartotaal op. Ze zijn daardoor bruikbaar in
+> long-term statistics, maar zet ze **niet** als kostenbron in het
+> Energy-dashboard — dat verwacht een cumulatieve meterstand.
+
 > **Entity-id's bij jou**: de integratie gebruikt `has_entity_name`, dus HA
 > plakt de device-naam ervoor — `sensor.slimhuys_frank_energie_huidige_prijs`
 > in plaats van `sensor.huidige_prijs`. In deze README staat overal de korte

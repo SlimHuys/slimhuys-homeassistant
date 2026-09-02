@@ -58,6 +58,7 @@ from .const import (
 )
 from .coordinator import SlimHuysCoordinator
 from .live_coordinator import SlimHuysLiveCoordinator
+from .usage_coordinator import SlimHuysUsageCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -132,6 +133,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SlimHuysCoordinator(hass, client, supplier)
     await coordinator.async_config_entry_first_refresh()
 
+    # Dagtotalen/-kosten staan los van de P1-mode: ook een push-mode-huis
+    # (geen live-coordinator) heeft een dagrekening. `async_refresh` i.p.v.
+    # `async_config_entry_first_refresh` zodat een hapering op dit endpoint
+    # de prijssensoren niet meesleurt — die zijn de kern van de integratie.
+    usage_coordinator = SlimHuysUsageCoordinator(hass, client)
+    await usage_coordinator.async_refresh()
+
     live_coordinator: SlimHuysLiveCoordinator | None = None
     if mode == P1_MODE_PULL:
         poll_fallback = bool(entry.options.get(
@@ -153,6 +161,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "coordinator": coordinator,
+        "usage_coordinator": usage_coordinator,
         "live_coordinator": live_coordinator,
         "supplier": supplier,
         "mode": mode,

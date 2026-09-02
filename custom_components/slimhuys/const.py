@@ -21,6 +21,11 @@ VERSION = _read_manifest_version()
 # How often we poll the SlimHuys API for fresh prices.
 SCAN_INTERVAL = timedelta(minutes=5)
 
+# Idem voor `/v1/me/usage/current` (dagtotalen + dagkosten). De API rekent
+# het `today`-blok per kwartier af, dus vaker pollen levert geen nieuwe
+# informatie op — alleen requests.
+USAGE_SCAN_INTERVAL = timedelta(minutes=5)
+
 # Alle prijs-timestamps worden in NL-tijd geïnterpreteerd — dag- en uurgrenzen
 # op het dashboard moeten met de EPEX-dag meelopen, niet met de HA-systeem-tz.
 TIMEZONE = "Europe/Amsterdam"
@@ -113,6 +118,17 @@ LIVE_SUFFIX_VOLTAGE_SAGS_L3 = "live_voltage_sags_l3"
 LIVE_SUFFIX_VOLTAGE_SWELLS_L1 = "live_voltage_swells_l1"
 LIVE_SUFFIX_VOLTAGE_SWELLS_L2 = "live_voltage_swells_l2"
 LIVE_SUFFIX_VOLTAGE_SWELLS_L3 = "live_voltage_swells_l3"
+
+# Sensor unique-id-suffixes voor de dagtotalen uit `/me/usage/current`
+USAGE_SUFFIX_COST_TODAY = "usage_cost_today"
+USAGE_SUFFIX_REVENUE_TODAY = "usage_revenue_today"
+USAGE_SUFFIX_GAS_COST_TODAY = "usage_gas_cost_today"
+USAGE_SUFFIX_NET_COST_TODAY = "usage_net_cost_today"
+USAGE_SUFFIX_CONSUMED_TODAY = "usage_consumed_today"
+USAGE_SUFFIX_DELIVERED_TODAY = "usage_delivered_today"
+USAGE_SUFFIX_PRODUCED_TODAY = "usage_produced_today"
+USAGE_SUFFIX_OWN_CONSUMPTION_TODAY = "usage_own_consumption_today"
+USAGE_SUFFIX_GAS_TODAY = "usage_gas_today"
 
 # Service names
 SERVICE_PUSH_READING = "push_reading"

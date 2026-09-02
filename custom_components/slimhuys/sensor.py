@@ -57,6 +57,15 @@ from .const import (
     LIVE_SUFFIX_VOLTAGE_SWELLS_L3,
     LIVE_SUFFIX_WATER_TOTAL,
     P1_MODE_PULL,
+    USAGE_SUFFIX_CONSUMED_TODAY,
+    USAGE_SUFFIX_COST_TODAY,
+    USAGE_SUFFIX_DELIVERED_TODAY,
+    USAGE_SUFFIX_GAS_COST_TODAY,
+    USAGE_SUFFIX_GAS_TODAY,
+    USAGE_SUFFIX_NET_COST_TODAY,
+    USAGE_SUFFIX_OWN_CONSUMPTION_TODAY,
+    USAGE_SUFFIX_PRODUCED_TODAY,
+    USAGE_SUFFIX_REVENUE_TODAY,
 )
 from .coordinator import (
     SlimHuysCoordinator,
@@ -65,6 +74,7 @@ from .coordinator import (
     slots_for_day,
 )
 from .live_coordinator import SlimHuysLiveCoordinator
+from .usage_coordinator import SlimHuysUsageCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +91,7 @@ async def async_setup_entry(
     supplier = state["supplier"]
     mode = state["mode"]
     live_coordinator: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
+    usage_coordinator: SlimHuysUsageCoordinator = state["usage_coordinator"]
 
     entities: list[SensorEntity] = [
         CurrentPriceSensor(coordinator, entry, supplier),
@@ -98,6 +109,15 @@ async def async_setup_entry(
         FeedinCurrentSensor(coordinator, entry, supplier),
         FeedinTodaySensor(coordinator, entry, supplier),
         FeedinTomorrowSensor(coordinator, entry, supplier),
+        UsageCostTodaySensor(usage_coordinator, entry, supplier),
+        UsageNetCostTodaySensor(usage_coordinator, entry, supplier),
+        UsageRevenueTodaySensor(usage_coordinator, entry, supplier),
+        UsageGasCostTodaySensor(usage_coordinator, entry, supplier),
+        UsageConsumedTodaySensor(usage_coordinator, entry, supplier),
+        UsageDeliveredTodaySensor(usage_coordinator, entry, supplier),
+        UsageProducedTodaySensor(usage_coordinator, entry, supplier),
+        UsageOwnConsumptionTodaySensor(usage_coordinator, entry, supplier),
+        UsageGasTodaySensor(usage_coordinator, entry, supplier),
     ]
 
     if mode == P1_MODE_PULL and live_coordinator is not None:
@@ -1056,3 +1076,190 @@ class LiveVoltageSagsSwellsSensor(_LiveBaseSensor):
     def native_value(self) -> int | None:
         v = self._read()
         return int(v) if v is not None else None
+
+
+# ---------- Dagtotalen + dagkosten (`/me/usage/current` → `today`) ----------
+
+
+class _UsageBaseSensor(CoordinatorEntity[SlimHuysUsageCoordinator], SensorEntity):
+    """Base voor de dag-sensoren — lezen uit `usage_coordinator.data["today"]`.
+
+    Alle dag-sensoren zijn `state_class = TOTAL` met een `last_reset` op
+    middernacht NL. Niet TOTAL_INCREASING: deze waarden vallen om 00:00 terug
+    naar 0 en de recorder zou dat zonder `last_reset` als een meter-rollover
+    lezen en de dagsprong bij het jaartotaal optellen.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.TOTAL
+    _field: str = ""
+
+    def __init__(
+        self,
+        coordinator: SlimHuysUsageCoordinator,
+        entry: ConfigEntry,
+        supplier: str,
+        unique_suffix: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": f"SlimHuys ({supplier})",
+            "manufacturer": "SlimHuys.nl",
+            "model": "Energy prices",
+            "configuration_url": "https://slimhuys.nl/app/verbruik",
+        }
+
+    @property
+    def _today(self) -> dict[str, Any] | None:
+        return (self.coordinator.data or {}).get("today")
+
+    @property
+    def available(self) -> bool:
+        # `today` is None bij een huis zonder meter én zonder supplier-cloud;
+        # losse velden zijn None als de bron ontbreekt (gaskosten zonder
+        # gastarief bijvoorbeeld). In beide gevallen is `unavailable` eerlijker
+        # dan een 0 die als "vandaag niets verbruikt" leest.
+        return super().available and self._read() is not None
+
+    @property
+    def last_reset(self):
+        return nl_now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _read(self, key: str | None = None) -> Any:
+        return (self._today or {}).get(key or self._field)
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
+class _UsageCostSensor(_UsageBaseSensor):
+    """€-sensor. `monetary` mág hier wél — dit is een bedrag, geen tarief.
+
+    (Zie v1.7.2: van de €/kWh-prijssensoren is `monetary` juist verwijderd,
+    omdat een prijs-per-eenheid geen som is die de recorder mag optellen.)
+    """
+
+    _attr_native_unit_of_measurement = CURRENCY_EURO
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 2
+
+
+class _UsageEnergySensor(_UsageBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_suggested_display_precision = 2
+
+
+class UsageCostTodaySensor(_UsageCostSensor):
+    _attr_icon = "mdi:cash-minus"
+    _field = "cost_eur"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_COST_TODAY, "Kosten vandaag")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        today = self._today
+        if not today:
+            return None
+        return {
+            "consumed_kwh": today.get("consumed_kwh"),
+            "quarters_count": today.get("quarters_count"),
+            # `supplier-cloud` = afgeleid uit Tibber/Frank-data i.p.v. de P1-
+            # meter; dan loopt het totaal een kwartier of langer achter.
+            "source": today.get("source", "p1"),
+        }
+
+
+class UsageRevenueTodaySensor(_UsageCostSensor):
+    _attr_icon = "mdi:cash-plus"
+    _field = "revenue_eur"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_REVENUE_TODAY, "Opbrengst vandaag")
+
+
+class UsageGasCostTodaySensor(_UsageCostSensor):
+    _attr_icon = "mdi:fire"
+    _field = "gas_cost_eur"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_GAS_COST_TODAY, "Gaskosten vandaag")
+
+
+class UsageNetCostTodaySensor(_UsageCostSensor):
+    """Stroom + gas − teruglevering: wat de dag je netto kost.
+
+    Gas telt mee zodra de API een gastarief kent; ontbreekt dat, dan is dit
+    puur elektra. Blijft beschikbaar zolang `cost_eur` er is — anders zou de
+    sensor wegvallen op een huis zonder gasaansluiting.
+    """
+
+    _attr_icon = "mdi:cash-multiple"
+    _field = "cost_eur"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_NET_COST_TODAY, "Netto kosten vandaag")
+
+    @property
+    def native_value(self) -> float | None:
+        cost = self._read("cost_eur")
+        if cost is None:
+            return None
+        gas = self._read("gas_cost_eur") or 0.0
+        revenue = self._read("revenue_eur") or 0.0
+        return round(float(cost) + float(gas) - float(revenue), 2)
+
+
+class UsageConsumedTodaySensor(_UsageEnergySensor):
+    _attr_icon = "mdi:transmission-tower-import"
+    _field = "consumed_kwh"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_CONSUMED_TODAY, "Verbruik vandaag")
+
+
+class UsageDeliveredTodaySensor(_UsageEnergySensor):
+    # Naam bewust niet "Teruglevering vandaag" — die is al bezet door de
+    # prijssensor (`feedin_today`, €/kWh) en zou een entity-id-botsing geven.
+    _attr_icon = "mdi:transmission-tower-export"
+    _field = "delivered_kwh"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_DELIVERED_TODAY, "Teruggeleverd vandaag")
+
+
+class UsageProducedTodaySensor(_UsageEnergySensor):
+    _attr_icon = "mdi:solar-power"
+    _field = "produced_kwh"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_PRODUCED_TODAY, "Opwek vandaag")
+
+
+class UsageOwnConsumptionTodaySensor(_UsageEnergySensor):
+    _attr_icon = "mdi:home-lightning-bolt"
+    _field = "own_consumption_kwh"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(
+            coordinator, entry, supplier,
+            USAGE_SUFFIX_OWN_CONSUMPTION_TODAY, "Eigen verbruik vandaag",
+        )
+
+
+class UsageGasTodaySensor(_UsageBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
+    _attr_device_class = SensorDeviceClass.GAS
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:meter-gas"
+    _field = "gas_m3"
+
+    def __init__(self, coordinator, entry, supplier):
+        super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_GAS_TODAY, "Gasverbruik vandaag")

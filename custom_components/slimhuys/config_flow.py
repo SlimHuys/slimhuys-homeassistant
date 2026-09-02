@@ -287,18 +287,30 @@ BATTERY_TEXT_FIELDS = (
 )
 
 
+# Naam-hints voor een SoC-sensor die géén device_class draagt. Bewust ruim:
+# een vals-positief kost een extra (optioneel) scherm, een vals-negatief maakt
+# de stap onbereikbaar voor wie 'm juist nodig heeft.
+_SOC_NAME_HINTS = ("battery", "batterij", "accu", "soc", "state_of_charge", "charge")
+
+
 def _has_battery_candidates(hass) -> bool:
     """Is er iets dat op een thuisbatterij lijkt? Zo nee, stap overslaan.
 
-    Kijkt naar een SoC-sensor: `device_class: battery` met unit `%`. Dat
-    matcht ook telefoon- en sensor-batterijen, maar die vals-positieven
-    kosten alleen een extra (optioneel) scherm — een vals-negatief zou de
-    stap onbereikbaar maken voor wie 'm juist nodig heeft.
+    Een `%`-sensor met `device_class: battery`, óf een `%`-sensor waarvan de
+    naam naar een batterij wijst. Die tweede tak is er omdat lang niet elke
+    batterij-integratie een device_class zet: een Marstek via een RS485-bridge
+    publiceert `sensor.…_battery_state_of_charge` met alléén
+    `unit_of_measurement: %`, en die viel op de strengere check buiten de boot.
     """
     for state in hass.states.async_all("sensor"):
-        device_class = (state.attributes.get("device_class") or "").lower()
         unit = (state.attributes.get("unit_of_measurement") or "").lower()
-        if device_class == "battery" and unit == "%":
+        if unit != "%":
+            continue
+        device_class = (state.attributes.get("device_class") or "").lower()
+        if device_class == "battery":
+            return True
+        haystack = f"{state.entity_id} {state.attributes.get('friendly_name') or ''}".lower()
+        if any(hint in haystack for hint in _SOC_NAME_HINTS):
             return True
     return False
 
@@ -333,15 +345,21 @@ def _battery_schema(defaults: dict | None = None) -> dict:
             default=bool(defaults.get(CONF_BATTERY_ENABLED, False)),
         ): bool,
     }
+    # Alleen op domein filteren, bewust niet op device_class. Omvormer- en
+    # bridge-integraties zetten die lang niet altijd: de Marstek-SoC via een
+    # LilyGO-RS485-bridge heeft alleen `unit_of_measurement: %`, en met een
+    # `device_class: battery`-filter is 'ie domweg niet te kiezen. Een langere
+    # (doorzoekbare) lijst is beter dan een sensor die je niet kúnt aanwijzen;
+    # de push leest de waarde toch zelf uit en valideert 'm daar.
     for key, selector in [
-        _entity(CONF_BATTERY_SOC, domain="sensor", device_class="battery"),
-        _entity(CONF_BATTERY_POWER, domain="sensor", device_class="power"),
-        _entity(CONF_BATTERY_CHARGE_POWER, domain="sensor", device_class="power"),
-        _entity(CONF_BATTERY_DISCHARGE_POWER, domain="sensor", device_class="power"),
-        _entity(CONF_BATTERY_CHARGED_TOTAL, domain="sensor", device_class="energy"),
-        _entity(CONF_BATTERY_DISCHARGED_TOTAL, domain="sensor", device_class="energy"),
-        _entity(CONF_BATTERY_TEMP, domain="sensor", device_class="temperature"),
-        _entity(CONF_BATTERY_PV_POWER, domain="sensor", device_class="power"),
+        _entity(CONF_BATTERY_SOC, domain="sensor"),
+        _entity(CONF_BATTERY_POWER, domain="sensor"),
+        _entity(CONF_BATTERY_CHARGE_POWER, domain="sensor"),
+        _entity(CONF_BATTERY_DISCHARGE_POWER, domain="sensor"),
+        _entity(CONF_BATTERY_CHARGED_TOTAL, domain="sensor"),
+        _entity(CONF_BATTERY_DISCHARGED_TOTAL, domain="sensor"),
+        _entity(CONF_BATTERY_TEMP, domain="sensor"),
+        _entity(CONF_BATTERY_PV_POWER, domain="sensor"),
         _entity(CONF_BATTERY_MODE, domain=["sensor", "select"]),
     ]:
         schema[key] = selector

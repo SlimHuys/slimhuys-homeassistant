@@ -73,8 +73,15 @@ werkt met GoodWe, Deye, Sessy, Victron, Marstek of wat je verder ook in HA
 hebt staan.
 
 Instellen via **Instellingen → Apparaten & diensten → SlimHuys → Opties →
-Thuisbatterij**. De stap verschijnt automatisch zodra HA een sensor met
-`device_class: battery` en unit `%` kent.
+Thuisbatterij**. De stap verschijnt automatisch zodra HA een `%`-sensor kent
+die naar een batterij verwijst — via `device_class: battery`, of via de naam
+(`battery`, `batterij`, `accu`, `soc`, `state_of_charge`).
+
+De entiteit-keuzelijsten filteren alleen op domein en niet op `device_class`:
+lang niet elke batterij-integratie zet die. Een Marstek via een RS485-bridge
+publiceert bijvoorbeeld `sensor.…_battery_state_of_charge` met alléén
+`unit_of_measurement: %`. De lijst is daardoor langer, maar doorzoekbaar — en
+je kunt elke sensor die je hebt ook echt aanwijzen.
 
 | Veld | Verplicht | Opmerking |
 |---|---|---|

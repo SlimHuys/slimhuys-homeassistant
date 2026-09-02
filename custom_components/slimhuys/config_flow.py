@@ -59,18 +59,28 @@ from .const import (
     CONF_P1_VOLTAGE_L3,
     CONF_PULL_POLL_FALLBACK,
     CONF_PULL_PROBE_AT_SETUP,
+    CONF_SOLAR_CAPACITY,
+    CONF_SOLAR_ENABLED,
+    CONF_SOLAR_EXTERNAL_ID,
+    CONF_SOLAR_INTERVAL,
+    CONF_SOLAR_NAME,
+    CONF_SOLAR_POWER,
+    CONF_SOLAR_TOTAL,
     CONF_SUPPLIER,
     DEFAULT_BASE_URL,
     DEFAULT_BATTERY_INTERVAL,
     DEFAULT_P1_INTERVAL,
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
+    DEFAULT_SOLAR_INTERVAL,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_BATTERY_INTERVAL,
     MAX_P1_INTERVAL,
+    MAX_SOLAR_INTERVAL,
     MIN_BATTERY_INTERVAL,
     MIN_P1_INTERVAL,
+    MIN_SOLAR_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
     P1_MODE_PUSH,
@@ -415,6 +425,111 @@ def _validate_battery(user_input: dict) -> tuple[dict, dict]:
     return cleaned, {}
 
 
+# ---------- Zonnepanelen ----------
+
+SOLAR_ENTITY_FIELDS = (
+    CONF_SOLAR_POWER,
+    CONF_SOLAR_TOTAL,
+)
+
+SOLAR_TEXT_FIELDS = (
+    CONF_SOLAR_NAME,
+    CONF_SOLAR_EXTERNAL_ID,
+)
+
+# Naam-hints voor een PV-sensor. Net als bij de batterij bewust ruim: een
+# vals-positief kost één extra (optioneel) scherm, een vals-negatief maakt de
+# stap onbereikbaar voor wie 'm juist nodig heeft. `pv` staat er als los woord
+# in — als substring matcht 'ie op van alles ("pv" in "supply").
+_SOLAR_NAME_HINTS = (
+    "solar", "zonnepaneel", "zonnepanelen", "zon_", "omvormer", "inverter",
+    "opwek", "photovoltaic",
+)
+_SOLAR_WORD_HINTS = ("pv",)
+
+
+def _has_solar_candidates(hass) -> bool:
+    """Is er iets dat op zonnepanelen lijkt? Zo nee, stap overslaan.
+
+    Kijkt naar W/kW/kWh-sensoren met een PV-achtige naam. Bewust niet op
+    `device_class: power` alleen — dat zijn in een gemiddeld huis tientallen
+    sensoren en het zegt niets over zon. De naam is hier de enige echte hint:
+    HA kent geen `device_class` die "dit is opwek" betekent.
+    """
+    for state in hass.states.async_all("sensor"):
+        unit = (state.attributes.get("unit_of_measurement") or "").lower()
+        if unit not in ("w", "kw", "kwh", "wh"):
+            continue
+        haystack = f"{state.entity_id} {state.attributes.get('friendly_name') or ''}".lower()
+        if any(hint in haystack for hint in _SOLAR_NAME_HINTS):
+            return True
+        words = haystack.replace(".", " ").replace("_", " ").replace("-", " ").split()
+        if any(hint in words for hint in _SOLAR_WORD_HINTS):
+            return True
+    return False
+
+
+def _solar_schema(defaults: dict | None = None) -> dict:
+    """Schema-dict voor de zonnepanelen-stap. Zelfde opzet als _battery_schema."""
+    defaults = defaults or {}
+
+    def _prefill(key):
+        value = defaults.get(key)
+        return {"suggested_value": value} if value else {}
+
+    schema: dict = {
+        vol.Required(
+            CONF_SOLAR_ENABLED,
+            default=bool(defaults.get(CONF_SOLAR_ENABLED, False)),
+        ): bool,
+    }
+    for key in SOLAR_ENTITY_FIELDS:
+        schema[vol.Optional(key, description=_prefill(key))] = EntitySelector(
+            EntitySelectorConfig(domain="sensor")
+        )
+    schema[vol.Optional(
+        CONF_SOLAR_INTERVAL,
+        default=max(MIN_SOLAR_INTERVAL, min(MAX_SOLAR_INTERVAL, int(
+            defaults.get(CONF_SOLAR_INTERVAL, DEFAULT_SOLAR_INTERVAL)
+        ))),
+    )] = vol.All(vol.Coerce(int), vol.Range(min=MIN_SOLAR_INTERVAL, max=MAX_SOLAR_INTERVAL))
+
+    for key in SOLAR_TEXT_FIELDS:
+        value = defaults.get(key)
+        schema[vol.Optional(
+            key, description={"suggested_value": value} if value else {}
+        )] = str
+    capacity = defaults.get(CONF_SOLAR_CAPACITY)
+    schema[vol.Optional(
+        CONF_SOLAR_CAPACITY,
+        description={"suggested_value": capacity} if capacity else {},
+    )] = vol.All(vol.Coerce(float), vol.Range(min=0, max=200))
+    return schema
+
+
+def _validate_solar(user_input: dict) -> tuple[dict, dict]:
+    """→ (opgeschoonde config, errors). Leeg dict aan config = uitgeschakeld."""
+    if not user_input.get(CONF_SOLAR_ENABLED):
+        # Zelfde als bij de batterij: bewaar de vlag, gooi de entity-keuzes
+        # niet weg — wie 'm later weer aanzet vindt ze terug.
+        cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+        cleaned[CONF_SOLAR_ENABLED] = False
+        return cleaned, {}
+
+    errors: dict[str, str] = {}
+    # Minstens één meetwaarde: de API weigert een reading zonder allebei.
+    # Vermogen heeft de voorkeur (dan kan de API integreren én de piek
+    # bepalen), maar een huis met alleen een kWh-teller is ook bruikbaar.
+    if not (user_input.get(CONF_SOLAR_POWER) or user_input.get(CONF_SOLAR_TOTAL)):
+        errors[CONF_SOLAR_POWER] = "solar_source_required"
+    if errors:
+        return {}, errors
+
+    cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+    cleaned[CONF_SOLAR_ENABLED] = True
+    return cleaned, {}
+
+
 class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Multi-step setup wizard."""
 
@@ -610,14 +725,14 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _continue_to_battery(self, p1_data: dict[str, Any]):
-        """Laatste stap, ongeacht P1-mode — een batterij staat daar los van.
+        """Batterij-stap, ongeacht P1-mode — een batterij staat daar los van.
 
         Geen batterij-achtige sensor in dit huis? Dan de stap overslaan; een
         leeg formulier is alleen maar een extra klik in de wizard.
         """
         self._p1_data = p1_data
         if not _has_battery_candidates(self.hass):
-            return self._finish_entry(p1_data)
+            return await self._continue_to_solar(p1_data)
         return await self.async_step_battery()
 
     async def async_step_battery(self, user_input: dict[str, Any] | None = None):
@@ -626,11 +741,32 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             battery_data, errors = _validate_battery(user_input)
             if not errors:
-                return self._finish_entry({**self._p1_data, **battery_data})
+                return await self._continue_to_solar({**self._p1_data, **battery_data})
 
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(_battery_schema(user_input or {})),
+            errors=errors,
+        )
+
+    async def _continue_to_solar(self, data: dict[str, Any]):
+        """Zelfde overweging als bij de batterij: geen PV-achtige sensor, geen stap."""
+        self._p1_data = data
+        if not _has_solar_candidates(self.hass):
+            return self._finish_entry(data)
+        return await self.async_step_solar()
+
+    async def async_step_solar(self, user_input: dict[str, Any] | None = None):
+        """Stap 6: zonnepanelen → SlimHuys (optioneel)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            solar_data, errors = _validate_solar(user_input)
+            if not errors:
+                return self._finish_entry({**self._p1_data, **solar_data})
+
+        return self.async_show_form(
+            step_id="solar",
+            data_schema=vol.Schema(_solar_schema(user_input or {})),
             errors=errors,
         )
 
@@ -815,7 +951,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
             CONF_BATTERY_ENABLED, entry.data.get(CONF_BATTERY_ENABLED, False)
         )
         if not configured and not _has_battery_candidates(self.hass):
-            return self._save_options(p1_data)
+            return await self._continue_to_solar(p1_data)
         return await self.async_step_battery()
 
     async def async_step_battery(self, user_input: dict[str, Any] | None = None):
@@ -823,7 +959,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             battery_data, errors = _validate_battery(user_input)
             if not errors:
-                return self._save_options({**self._p1_data, **battery_data})
+                return await self._continue_to_solar({**self._p1_data, **battery_data})
 
         entry = self.config_entry
 
@@ -839,6 +975,43 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(_battery_schema(defaults)),
+            errors=errors,
+        )
+
+    async def _continue_to_solar(self, data: dict[str, Any]):
+        self._p1_data = data
+        # Zelfde uitzondering als bij de batterij: wie de panelen ooit heeft
+        # ingesteld moet 'm ook kunnen uitzetten als de omvormer offline staat
+        # en de kandidaat-check dus niets vindt.
+        entry = self.config_entry
+        configured = entry.options.get(
+            CONF_SOLAR_ENABLED, entry.data.get(CONF_SOLAR_ENABLED, False)
+        )
+        if not configured and not _has_solar_candidates(self.hass):
+            return self._save_options(data)
+        return await self.async_step_solar()
+
+    async def async_step_solar(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            solar_data, errors = _validate_solar(user_input)
+            if not errors:
+                return self._save_options({**self._p1_data, **solar_data})
+
+        entry = self.config_entry
+
+        def get(key, default=None):
+            return entry.options.get(key, entry.data.get(key, default))
+
+        defaults = user_input or {
+            k: v for k in (
+                CONF_SOLAR_ENABLED, CONF_SOLAR_INTERVAL, CONF_SOLAR_CAPACITY,
+                *SOLAR_ENTITY_FIELDS, *SOLAR_TEXT_FIELDS,
+            ) if (v := get(k)) is not None
+        }
+        return self.async_show_form(
+            step_id="solar",
+            data_schema=vol.Schema(_solar_schema(defaults)),
             errors=errors,
         )
 

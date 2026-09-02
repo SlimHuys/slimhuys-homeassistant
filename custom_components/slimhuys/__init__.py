@@ -64,15 +64,25 @@ from .const import (
     CONF_P1_VOLTAGE_L3,
     CONF_PULL_POLL_FALLBACK,
     CONF_PULL_PROBE_AT_SETUP,
+    CONF_SOLAR_CAPACITY,
+    CONF_SOLAR_ENABLED,
+    CONF_SOLAR_EXTERNAL_ID,
+    CONF_SOLAR_INTERVAL,
+    CONF_SOLAR_NAME,
+    CONF_SOLAR_POWER,
+    CONF_SOLAR_TOTAL,
     CONF_SUPPLIER,
     DEFAULT_BASE_URL,
     DEFAULT_P1_INTERVAL,
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
+    DEFAULT_SOLAR_INTERVAL,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_P1_INTERVAL,
+    MAX_SOLAR_INTERVAL,
     MIN_P1_INTERVAL,
+    MIN_SOLAR_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
     P1_MODE_PUSH,
@@ -194,6 +204,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "battery_unsub": None,
         "battery_pending_unsub": None,
         "battery_timer_unsub": None,
+        "solar_unsub": None,
+        "solar_pending_unsub": None,
+        "solar_timer_unsub": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -209,6 +222,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Batterij-push staat los van de P1-mode — ook een pull- of none-huis kan
     # een thuisbatterij hebben die HA wél ziet en SlimHuys niet.
     _maybe_start_battery_push(hass, entry)
+
+    # Idem voor de zonnepanelen: SlimHuys kent opwek alleen uit een
+    # cloud-koppeling met de omvormer, en die bestaat niet voor elk merk.
+    _maybe_start_solar_push(hass, entry)
 
     # Service push_reading: voor users die liever zelf via automation pushen
     if not hass.services.has_service(DOMAIN, SERVICE_PUSH_READING):
@@ -260,6 +277,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["battery_pending_unsub"]()
     if state.get("battery_timer_unsub"):
         state["battery_timer_unsub"]()
+    if state.get("solar_unsub"):
+        state["solar_unsub"]()
+    if state.get("solar_pending_unsub"):
+        state["solar_pending_unsub"]()
+    if state.get("solar_timer_unsub"):
+        state["solar_timer_unsub"]()
     live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
     if live is not None:
         await live.async_stop()
@@ -686,6 +709,196 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         hass, sensors_to_watch, _on_state_change
     )
     state["battery_timer_unsub"] = async_track_time_interval(
+        hass, _tick, timedelta(seconds=interval)
+    )
+
+
+def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Zonnepanelen → `POST /v1/me/solar/readings`, state-change-driven.
+
+    Zelfde throttle/backoff/hartslag-patroon als `_maybe_start_battery_push`.
+    De hartslag is hier net zo hard nodig: een omvormer die 's nachts op 0 W
+    staat levert uren geen state-change-event, en zonder tick zou SlimHuys
+    het gat niet van een uitgevallen koppeling kunnen onderscheiden.
+    """
+    def _get(key, default=None):
+        return entry.options.get(key, entry.data.get(key, default))
+
+    if not _get(CONF_SOLAR_ENABLED, False):
+        return
+
+    power = _get(CONF_SOLAR_POWER)
+    total = _get(CONF_SOLAR_TOTAL)
+    if not (power or total):
+        _LOGGER.warning(
+            "Zonnepanelen-push staat aan maar mist een vermogens- én een "
+            "opwek-sensor; overgeslagen"
+        )
+        return
+
+    interval = max(
+        MIN_SOLAR_INTERVAL,
+        min(MAX_SOLAR_INTERVAL, int(_get(CONF_SOLAR_INTERVAL, DEFAULT_SOLAR_INTERVAL))),
+    )
+
+    # Metadata mag bij elke push mee — de API schrijft 'm alleen weg als er
+    # iets verandert. `external_id` onderscheidt straks een tweede installatie
+    # (twee arrays op twee omvormers) van de eerste.
+    station_meta = {
+        key: value
+        for key, value in (
+            ("external_id", _get(CONF_SOLAR_EXTERNAL_ID)),
+            ("name", _get(CONF_SOLAR_NAME)),
+            ("capacity_kwp", _get(CONF_SOLAR_CAPACITY)),
+        )
+        if value not in (None, "")
+    }
+
+    state = hass.data[DOMAIN][entry.entry_id]
+    client: SlimHuysClient = state["client"]
+    push_state = {
+        "last_attempt": 0.0, "failures": 0, "in_flight": False, "stopped": False,
+    }
+
+    def _current_interval() -> float:
+        if not push_state["failures"]:
+            return float(interval)
+        return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
+
+    def _elapsed() -> float:
+        """Tijd sinds de vorige poging; `inf` als er nog geen is geweest."""
+        if not push_state["last_attempt"]:
+            return float("inf")
+        return monotonic() - push_state["last_attempt"]
+
+    def _read_power_w(entity_id: str | None) -> int | None:
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ("kw", "kilowatt"):
+            value *= 1000
+        elif unit in ("mw", "megawatt"):
+            value *= 1_000_000
+        return int(round(value))
+
+    def _read_energy_kwh(entity_id: str | None) -> float | None:
+        """Opwek-teller naar kWh. Wh en MWh komen allebei voor in het veld.
+
+        Een teller in Wh is geen randgeval: veel omvormer-integraties
+        publiceren `..._energy_total` in Wh, en die als kWh doorsturen zou de
+        dagopbrengst met een factor 1000 opblazen.
+        """
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ("wh", "watt-hour", "watthour"):
+            value /= 1000
+        elif unit in ("mwh", "megawatt-hour"):
+            value *= 1000
+        return round(value, 3)
+
+    async def _do_push(_now=None) -> None:
+        state["solar_pending_unsub"] = None
+        if push_state["in_flight"] or push_state["stopped"]:
+            return
+
+        payload: dict[str, Any] = {"timestamp": _now_iso()}
+        power_w = _read_power_w(power)
+        if power_w is not None:
+            payload["power_w"] = power_w
+        produced = _read_energy_kwh(total)
+        if produced is not None:
+            payload["produced_kwh_total"] = produced
+        if len(payload) == 1:
+            return  # geen enkele meetwaarde beschikbaar; niets doorzetten
+
+        push_state["in_flight"] = True
+        push_state["last_attempt"] = monotonic()
+        try:
+            await client.push_solar_readings([payload], station_meta or None)
+            if push_state["failures"]:
+                _LOGGER.debug(
+                    "SlimHuys zonnepanelen-push hersteld na %d fouten",
+                    push_state["failures"],
+                )
+                push_state["failures"] = 0
+        except SlimHuysApiError as err:
+            # 409 solar-source-conflict is geen storing maar een keuze die de
+            # gebruiker moet maken: SlimHuys haalt de opwek al op bij de
+            # omvormer-cloud, en twee bronnen voor dezelfde panelen tellen
+            # dubbel. Blijven retryen lost dat nooit op, dus stoppen we tot
+            # de gebruiker één van de twee uitzet (reload = nieuwe kans).
+            if "solar-source-conflict" in str(err):
+                push_state["stopped"] = True
+                _LOGGER.error(
+                    "SlimHuys haalt de opwek van dit huis al op via een "
+                    "koppeling met je omvormer. Twee bronnen tellen dubbel, "
+                    "dus de zonnepanelen-push is gestopt. Koppel die los op "
+                    "slimhuys.nl als je de opwek voortaan vanuit Home "
+                    "Assistant wilt sturen, of zet deze push uit."
+                )
+                return
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.debug(
+                "SlimHuys zonnepanelen-push faalde (poging %d, volgende over %.0fs): %s",
+                push_state["failures"], _current_interval(), err,
+            )
+        except Exception as err:  # noqa: BLE001
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.warning("Onverwachte fout in zonnepanelen-push: %s", err)
+        finally:
+            push_state["in_flight"] = False
+
+    @callback
+    def _on_state_change(_event) -> None:
+        if (
+            push_state["in_flight"]
+            or push_state["stopped"]
+            or state.get("solar_pending_unsub") is not None
+        ):
+            return
+        window = _current_interval()
+        elapsed = _elapsed()
+        if elapsed >= window:
+            hass.async_create_task(_do_push())
+        else:
+            delay = max(0.1, window - elapsed)
+            state["solar_pending_unsub"] = async_call_later(hass, delay, _do_push)
+
+    async def _tick(_now) -> None:
+        """Hartslag — push ook als er niets veranderd is.
+
+        Zon staat 's nachts stil op 0 W en de teller blijft staan; dat levert
+        uren geen state-change op. Zonder tick zou de API dat gat niet van een
+        stukgelopen koppeling kunnen onderscheiden — én het eerste kwartier na
+        zonsopgang mist z'n teller-baseline.
+        """
+        if push_state["in_flight"] or push_state["stopped"]:
+            return
+        if _elapsed() < _current_interval():
+            return
+        await _do_push()
+
+    sensors_to_watch = [e for e in (power, total) if e]
+
+    state["solar_unsub"] = async_track_state_change_event(
+        hass, sensors_to_watch, _on_state_change
+    )
+    state["solar_timer_unsub"] = async_track_time_interval(
         hass, _tick, timedelta(seconds=interval)
     )
 

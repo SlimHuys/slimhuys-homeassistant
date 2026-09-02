@@ -177,6 +177,33 @@ BATTERY_SUFFIX_STATE = "battery_state"
 BATTERY_SUFFIX_ENERGY = "battery_energy"
 BATTERY_SUFFIX_TEMP = "battery_temp"
 
+# ----- Zonnepanelen (HA → SlimHuys, `POST /v1/me/solar/readings`) -----
+# Staat los van zowel CONF_P1_MODE als de batterij-vlag: een huis kan zijn
+# P1 pushen én panelen hebben, of alleen panelen. SlimHuys haalt opwek
+# anders alleen uit een cloud-koppeling met de omvormer (GoodWe, SolarEdge,
+# Enphase) — heb je een ander merk, dan bleven `opwek_vandaag` en
+# `eigen_verbruik_vandaag` leeg terwijl HA de omvormer allang uitleest.
+CONF_SOLAR_ENABLED = "solar_enabled"
+CONF_SOLAR_POWER = "solar_power_sensor"
+# Levenslange kWh-teller. Optioneel maar sterk aanbevolen: de API rekent er
+# de kwartier-opwek uit als delta, wat nauwkeuriger is dan integreren over
+# het momentaan vermogen. Zonder teller valt de API terug op integratie.
+CONF_SOLAR_TOTAL = "solar_total_sensor"
+CONF_SOLAR_INTERVAL = "solar_interval_seconds"
+# Metadata die met elke push meegaat; de API auto-provisiont hierop.
+CONF_SOLAR_NAME = "solar_name"
+CONF_SOLAR_EXTERNAL_ID = "solar_external_id"
+# kWp — voedt de opbrengst-voorspelling op slimhuys.nl. Zonder capaciteit
+# kan er geen forecast berekend worden; de opwek-registratie werkt wel.
+CONF_SOLAR_CAPACITY = "solar_capacity_kwp"
+
+# Zelfde ondergrens als P1 en batterij, om dezelfde reden: de throttle
+# beschermt de API, niet het minimum. Een omvormer publiceert in de praktijk
+# elke 5-30s, dus daar ligt het echte tempo.
+DEFAULT_SOLAR_INTERVAL = 30
+MIN_SOLAR_INTERVAL = 1
+MAX_SOLAR_INTERVAL = 300
+
 # Service names
 SERVICE_PUSH_READING = "push_reading"
 

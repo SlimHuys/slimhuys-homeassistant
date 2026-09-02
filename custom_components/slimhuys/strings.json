@@ -77,11 +77,25 @@
           "battery_external_id": "Serial number / inverter SN",
           "battery_capacity_kwh": "Usable capacity (kWh)"
         }
+      },
+      "solar": {
+        "title": "Solar panels (optional)",
+        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
+        "data": {
+          "solar_enabled": "Push solar to SlimHuys",
+          "solar_power_sensor": "Current production (W or kW)",
+          "solar_total_sensor": "Total produced (kWh, cumulative — recommended)",
+          "solar_interval_seconds": "Push interval (seconds, min 1)",
+          "solar_name": "Name",
+          "solar_external_id": "Installation id (when you have more than one)",
+          "solar_capacity_kwp": "Installed capacity (kWp)"
+        }
       }
     },
     "error": {
       "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
       "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
+      "solar_source_required": "Pick a production sensor (power or kWh counter), or turn the solar push off.",
       "invalid_auth": "API key is invalid or revoked.",
       "cannot_connect": "Cannot reach SlimHuys — check the base URL and your internet."
     },
@@ -149,6 +163,19 @@
           "battery_model": "Model",
           "battery_external_id": "Serial number / inverter SN",
           "battery_capacity_kwh": "Usable capacity (kWh)"
+        }
+      },
+      "solar": {
+        "title": "Solar panels (optional)",
+        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
+        "data": {
+          "solar_enabled": "Push solar to SlimHuys",
+          "solar_power_sensor": "Current production (W or kW)",
+          "solar_total_sensor": "Total produced (kWh, cumulative — recommended)",
+          "solar_interval_seconds": "Push interval (seconds, min 1)",
+          "solar_name": "Name",
+          "solar_external_id": "Installation id (when you have more than one)",
+          "solar_capacity_kwp": "Installed capacity (kWp)"
         }
       }
     }

@@ -47,6 +47,10 @@ levert niets nieuws op. Ze werken in **elke** P1-mode (`none`, `push` én
 `pull`): ook als je zelf je P1 naar SlimHuys pusht, krijg je je dagrekening
 terug in HA.
 
+`opwek_vandaag` en `eigen_verbruik_vandaag` vullen zich alleen als SlimHuys
+je opwek kent — via een koppeling met je omvormer-cloud, of sinds v1.11.0 door
+'m zelf te pushen (zie [Zonnepanelen](#zonnepanelen-v1110)).
+
 `netto_kosten_vandaag` = stroom + gas − teruglevering. `kosten_vandaag`
 is alleen de afname van stroom. De gassensoren zijn `unavailable` op een
 huis zonder gasaansluiting (of zolang SlimHuys geen gastarief kent voor je
@@ -123,6 +127,49 @@ informatie.
 
 In **pull**-mode krijg je de batterij ook terúg als HA-entiteiten (laadtoestand,
 vermogen, status, inhoud, temperatuur) — elke batterij als eigen apparaat.
+
+## Zonnepanelen (v1.11.0)
+
+SlimHuys haalde de opwek tot nu toe alleen op via een koppeling met je
+omvormer-cloud (GoodWe SEMS, SolarEdge, Enphase). Heb je een ander merk, of
+hangt je omvormer bewust niet aan een cloud, dan bleven `opwek_vandaag` en
+`eigen_verbruik_vandaag` leeg — terwijl Home Assistant je omvormer allang
+uitleest. Sinds v1.11.0 kun je die opwek dus net als je P1 en je batterij
+zelf pushen.
+
+Instellen via **Instellingen → Apparaten & diensten → SlimHuys → Opties →
+Zonnepanelen**. De stap verschijnt zodra HA een W-, kW- of kWh-sensor kent
+waarvan de naam naar zon verwijst (`solar`, `pv`, `zonnepanelen`, `omvormer`,
+`inverter`, `opwek`).
+
+| Veld | Verplicht | Opmerking |
+|---|---|---|
+| Opwek nu | ja¹ | W of kW |
+| Totaal opgewekt | ja¹ | levenslange kWh-teller; aanbevolen |
+| Installatie-id | nee | pas nodig bij een tweede installatie |
+| Naam, kWp | nee | kWp voedt de opbrengst-voorspelling op slimhuys.nl |
+
+¹ Minstens één van de twee. Allebei is het beste: uit de teller rekent
+SlimHuys de opwek per kwartier als verschil (nauwkeurig), en uit het vermogen
+komt het piekvermogen én een terugval als de teller een keer terugvalt — wat
+gebeurt bij een HA-herstart die je `utility_meter` kwijtraakt. Eenheden
+worden omgerekend: kW en MW naar W, Wh en MWh naar kWh.
+
+> **Heb je je omvormer al aan SlimHuys gekoppeld?** Laat deze stap dan uit.
+> Dezelfde panelen via twee bronnen tellen op tot het dubbele, dus de API
+> weigert de push met een duidelijke foutmelding en de integratie stopt met
+> pushen tot je één van de twee uitzet. Wil je overstappen naar HA-push, dan
+> koppel je de omvormer los op slimhuys.nl.
+
+Standaard push-interval is 30 seconden, ondergrens 1. Net als bij de batterij
+gaat de push door zodra je sensor verandert én sowieso elk interval — een
+omvormer die 's nachts op 0 W staat levert uren geen state-change-event op, en
+zonder die hartslag mist het eerste kwartier na zonsopgang zijn beginstand.
+
+`eigen_verbruik_vandaag` is `opwek − teruglevering`, dus die vult zich vanzelf
+mee zodra de opwek binnenkomt. Reken op zo'n vijf tot tien minuten voor de
+eerste waarden zichtbaar zijn: SlimHuys sluit kwartieren af en de dagsensoren
+pollen elke vijf minuten.
 
 ### Prijsarrays voor dashboards
 

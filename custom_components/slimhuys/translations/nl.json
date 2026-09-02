@@ -77,11 +77,25 @@
           "battery_external_id": "Serienummer / omvormer-SN",
           "battery_capacity_kwh": "Bruikbare capaciteit (kWh)"
         }
+      },
+      "solar": {
+        "title": "Zonnepanelen (optioneel)",
+        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
+        "data": {
+          "solar_enabled": "Zonnepanelen naar SlimHuys pushen",
+          "solar_power_sensor": "Opwek nu (W of kW)",
+          "solar_total_sensor": "Totaal opgewekt (kWh, cumulatief — aanbevolen)",
+          "solar_interval_seconds": "Push-interval (seconden, min 1)",
+          "solar_name": "Naam",
+          "solar_external_id": "Installatie-id (bij meerdere installaties)",
+          "solar_capacity_kwp": "Vermogen van de installatie (kWp)"
+        }
       }
     },
     "error": {
       "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
       "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
+      "solar_source_required": "Kies een opwek-sensor (vermogen of kWh-teller), of zet de zonnepanelen-push uit.",
       "invalid_auth": "API-key is ongeldig of ingetrokken.",
       "cannot_connect": "Kan SlimHuys niet bereiken — controleer de basis-URL en je internet."
     },
@@ -149,6 +163,19 @@
           "battery_model": "Model",
           "battery_external_id": "Serienummer / omvormer-SN",
           "battery_capacity_kwh": "Bruikbare capaciteit (kWh)"
+        }
+      },
+      "solar": {
+        "title": "Zonnepanelen (optioneel)",
+        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
+        "data": {
+          "solar_enabled": "Zonnepanelen naar SlimHuys pushen",
+          "solar_power_sensor": "Opwek nu (W of kW)",
+          "solar_total_sensor": "Totaal opgewekt (kWh, cumulatief — aanbevolen)",
+          "solar_interval_seconds": "Push-interval (seconden, min 1)",
+          "solar_name": "Naam",
+          "solar_external_id": "Installatie-id (bij meerdere installaties)",
+          "solar_capacity_kwp": "Vermogen van de installatie (kWp)"
         }
       }
     }

@@ -139,6 +139,27 @@ class SlimHuysClient:
             "POST", "/v1/me/battery/readings", json=payload, with_auth=True
         )
 
+    async def push_solar_readings(
+        self,
+        readings: list[dict[str, Any]],
+        station: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """POST /v1/me/solar/readings.
+
+        `station` is de metadata-envelope waarop de API auto-provisiont
+        (`external_id`, `name`, `capacity_kwp`). Een huis dat z'n omvormer
+        al via de cloud gekoppeld heeft krijgt 409
+        `errors/solar-source-conflict`: dezelfde panelen via twee bronnen
+        tellen op tot het dubbele, dus de API weigert liever dan te
+        verdubbelen.
+        """
+        payload: dict[str, Any] = {"readings": readings}
+        if station:
+            payload["station"] = station
+        return await self._request(
+            "POST", "/v1/me/solar/readings", json=payload, with_auth=True
+        )
+
     async def current_usage(self) -> dict[str, Any]:
         """Snapshot — `live` (laatste reading), `today`, `meter`, `solar`.
 

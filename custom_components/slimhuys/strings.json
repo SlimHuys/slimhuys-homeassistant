@@ -54,9 +54,34 @@
           "p1_power_returned_l3_sensor": "Power L3 returned (-P, W, optional)",
           "p1_gas_sensor": "Gas (m³ cumulative, optional)"
         }
+      },
+      "battery": {
+        "title": "Home battery (optional)",
+        "description": "Push your home battery to SlimHuys so you can see charge level, charging/discharging and daily savings there. Leave the toggle off to skip.\n\nEither pick one signed power sensor, or the separate charge/discharge pair. Fill in the serial number if you (will) have more than one battery — that is what keeps them apart.",
+        "data": {
+          "battery_enabled": "Push battery to SlimHuys",
+          "battery_soc_sensor": "Charge level (%, required)",
+          "battery_power_sensor": "Power (signed, + = charging)",
+          "battery_charge_power_sensor": "Charge power (alternative, always >= 0)",
+          "battery_discharge_power_sensor": "Discharge power (alternative, always >= 0)",
+          "battery_charged_total_sensor": "Total charged (kWh, cumulative)",
+          "battery_discharged_total_sensor": "Total discharged (kWh, cumulative)",
+          "battery_temp_sensor": "Temperature",
+          "battery_pv_power_sensor": "Solar input on the inverter",
+          "battery_mode_entity": "Mode / status entity",
+          "battery_invert_power": "Invert power (my sensor is positive when discharging)",
+          "battery_interval_seconds": "Push interval (seconds, min 5)",
+          "battery_name": "Name",
+          "battery_brand": "Brand (e.g. goodwe, deye)",
+          "battery_model": "Model",
+          "battery_external_id": "Serial number / inverter SN",
+          "battery_capacity_kwh": "Usable capacity (kWh)"
+        }
       }
     },
     "error": {
+      "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
+      "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
       "invalid_auth": "API key is invalid or revoked.",
       "cannot_connect": "Cannot reach SlimHuys — check the base URL and your internet."
     },
@@ -101,6 +126,29 @@
           "p1_power_returned_l2_sensor": "Power L2 returned (-P, W, optional)",
           "p1_power_returned_l3_sensor": "Power L3 returned (-P, W, optional)",
           "p1_gas_sensor": "Gas (m³ cumulative, optional)"
+        }
+      },
+      "battery": {
+        "title": "Home battery (optional)",
+        "description": "Push your home battery to SlimHuys so you can see charge level, charging/discharging and daily savings there. Leave the toggle off to skip.\n\nEither pick one signed power sensor, or the separate charge/discharge pair. Fill in the serial number if you (will) have more than one battery — that is what keeps them apart.",
+        "data": {
+          "battery_enabled": "Push battery to SlimHuys",
+          "battery_soc_sensor": "Charge level (%, required)",
+          "battery_power_sensor": "Power (signed, + = charging)",
+          "battery_charge_power_sensor": "Charge power (alternative, always >= 0)",
+          "battery_discharge_power_sensor": "Discharge power (alternative, always >= 0)",
+          "battery_charged_total_sensor": "Total charged (kWh, cumulative)",
+          "battery_discharged_total_sensor": "Total discharged (kWh, cumulative)",
+          "battery_temp_sensor": "Temperature",
+          "battery_pv_power_sensor": "Solar input on the inverter",
+          "battery_mode_entity": "Mode / status entity",
+          "battery_invert_power": "Invert power (my sensor is positive when discharging)",
+          "battery_interval_seconds": "Push interval (seconds, min 5)",
+          "battery_name": "Name",
+          "battery_brand": "Brand (e.g. goodwe, deye)",
+          "battery_model": "Model",
+          "battery_external_id": "Serial number / inverter SN",
+          "battery_capacity_kwh": "Usable capacity (kWh)"
         }
       }
     }

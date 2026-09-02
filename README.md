@@ -65,6 +65,51 @@ contract) — `netto_kosten_vandaag` rekent dan gewoon zonder gas verder.
 > vorm; kijk je eigen id's na via **Developer tools → States** (filter op
 > `slimhuys`) of hernoem de entiteiten naar de korte vorm.
 
+## Thuisbatterij (v1.9.0)
+
+Koppel je thuisbatterij aan SlimHuys en zie daar laadtoestand, laden/ontladen
+en je dagbesparing. Merkonafhankelijk: je kiest zelf de entiteiten, dus het
+werkt met GoodWe, Deye, Sessy, Victron, Marstek of wat je verder ook in HA
+hebt staan.
+
+Instellen via **Instellingen → Apparaten & diensten → SlimHuys → Opties →
+Thuisbatterij**. De stap verschijnt automatisch zodra HA een sensor met
+`device_class: battery` en unit `%` kent.
+
+| Veld | Verplicht | Opmerking |
+|---|---|---|
+| Laadtoestand | ja | `%`-sensor |
+| Vermogen | ja¹ | één signed sensor, **+ = laden** |
+| Laad-/ontlaadvermogen | ja¹ | alternatief: twee altijd-positieve sensoren |
+| Vermogen omkeren | — | aanvinken als jouw sensor positief is bij *ontladen* |
+| Totaal geladen/ontladen | nee | cumulatieve kWh-tellers |
+| Temperatuur, zon-input, mode | nee | |
+| Serienummer | zie hieronder | scheidt meerdere batterijen |
+| Capaciteit, naam, merk, model | nee | metadata |
+
+¹ Kies óf de signed sensor, óf het laad-/ontlaadpaar.
+
+> **Het teken klopt niet vanzelf.** HA-integraties zijn het onderling niet
+> eens over welke kant positief is bij een batterij-vermogenssensor; sommige
+> rapporteren *ontladen* positief. SlimHuys hanteert + = laden. Zie je in de
+> app laden waar je ontladen verwacht, zet dan "vermogen omkeren" aan — dat is
+> de enige knop die je hiervoor nodig hebt.
+
+> **Vul het serienummer in, ook met één batterij.** Dat is wat straks een
+> tweede batterij van de eerste onderscheidt. Zonder serienummer en met
+> meerdere batterijen weigert de API de push (`422 ambiguous-battery`) in
+> plaats van te gokken — de integratie stopt dan met pushen en logt een
+> foutmelding, tot je het serienummer invult. Een push mét serienummer
+> adopteert een bestaande batterij zonder, dus je verliest geen historie als
+> je 'm later alsnog invult.
+
+Standaard push-interval is 30 seconden, ondergrens 5. Sneller heeft geen zin:
+een omvormer publiceert veel trager dan een 1 Hz-P1-bridge, en de API upsert
+dubbele metingen toch weg op `(batterij, tijdstip)`.
+
+In **pull**-mode krijg je de batterij ook terúg als HA-entiteiten (laadtoestand,
+vermogen, status, inhoud, temperatuur) — elke batterij als eigen apparaat.
+
 ### Prijsarrays voor dashboards
 
 `prijzen_vandaag` en `prijzen_morgen` stellen de hele dag als attributen beschikbaar — compatibel met ApexCharts-Card, Energy Tariff Card en andere community-cards die de Nordpool/ENTSO-e-conventie volgen:

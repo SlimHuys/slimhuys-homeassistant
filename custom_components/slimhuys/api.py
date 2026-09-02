@@ -120,6 +120,25 @@ class SlimHuysClient:
             with_auth=True,
         )
 
+    async def push_battery_readings(
+        self,
+        readings: list[dict[str, Any]],
+        battery: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """POST /v1/me/battery/readings.
+
+        `battery` is de metadata-envelope waarop de API auto-provisiont
+        (`external_id`, `name`, `brand`, `capacity_kwh`, …). Zonder
+        `external_id` en met meerdere batterijen in het huis antwoordt de API
+        met 422 `errors/ambiguous-battery` in plaats van te gokken.
+        """
+        payload: dict[str, Any] = {"readings": readings}
+        if battery:
+            payload["battery"] = battery
+        return await self._request(
+            "POST", "/v1/me/battery/readings", json=payload, with_auth=True
+        )
+
     async def current_usage(self) -> dict[str, Any]:
         """Snapshot — `live` (laatste reading), `today`, `meter`, `solar`.
 

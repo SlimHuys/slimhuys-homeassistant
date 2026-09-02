@@ -28,10 +28,15 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
 
         { "p1": {timestamp, active_power_w, ...},
           "water": {timestamp, total_liter},
+          "batteries": {"<battery-id>": {soc_pct, power_w, ...}, ...},
           ... }
 
     Sensor-entities lezen hun eigen subkey. Geen merging tussen streams —
     een SSE-event update alleen z'n eigen subkey, andere blijven onaangeroerd.
+
+    `batteries` is bewust een dict-per-id en geen vlakke sub-dict zoals de
+    andere streams: de API emit één `battery-reading` per batterij, dus met
+    één gedeelde dict zouden twee batterijen elkaars SoC overschrijven.
     """
 
     def __init__(
@@ -55,6 +60,18 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
         self._poll_task: asyncio.Task | None = None
         self._consecutive_failures = 0
         self._discovered_fields: set[str] = set()
+        self._battery_meta: dict[str, dict[str, Any]] = {}
+
+    @property
+    def batteries(self) -> list[dict[str, Any]]:
+        """Batterijen die bij de probe gezien zijn — id, naam, capaciteit.
+
+        Het sensor-platform maakt hier per batterij een set entities voor aan.
+        Batterijen die pas ná setup verschijnen (nieuwe omvormer) komen mee bij
+        de volgende HA-restart of reload; dynamisch entities bijmaken vanuit
+        een SSE-event zou een entity-registry-write per event betekenen.
+        """
+        return list(self._battery_meta.values())
 
     @property
     def discovered_fields(self) -> set[str]:
@@ -83,6 +100,7 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
 
         live = (snapshot or {}).get("live") or {}
         water = (snapshot or {}).get("water") or {}
+        batteries = (snapshot or {}).get("batteries") or []
         self._record_fields(live)
         self._record_fields(water)
         self.data = {}
@@ -90,6 +108,11 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
             self.data["p1"] = live
         if water:
             self.data["water"] = water
+        if batteries:
+            self._battery_meta = {
+                b["id"]: b for b in batteries if isinstance(b, dict) and b.get("id")
+            }
+            self.data["batteries"] = dict(self._battery_meta)
 
     async def async_start(self) -> None:
         """Start de SSE-loop + (optioneel) latente polling-fallback."""
@@ -174,6 +197,9 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
                 snapshot = await self._client.current_usage()
                 live = (snapshot or {}).get("live") or {}
                 water = (snapshot or {}).get("water") or {}
+                for battery in (snapshot or {}).get("batteries") or []:
+                    if isinstance(battery, dict) and battery.get("id"):
+                        self._handle_event("battery-reading", battery)
                 if live:
                     self._handle_event("reading", live)
                 if water:
@@ -195,6 +221,10 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
         if event_name == "hello":
             return
 
+        if event_name == "battery-reading":
+            self._handle_battery_event(payload)
+            return
+
         stream_key = {
             "reading": "p1",
             "water-reading": "water",
@@ -207,6 +237,29 @@ class SlimHuysLiveCoordinator(DataUpdateCoordinator):
         self._record_fields(payload)
         new_data = dict(self.data or {})
         new_data[stream_key] = {**(new_data.get(stream_key) or {}), **payload}
+        self.async_set_updated_data(new_data)
+
+    def _handle_battery_event(self, payload: dict[str, Any]) -> None:
+        """Per-batterij mergen op `id`, niet op één gedeelde stream-key.
+
+        De API stuurt één event per batterij. Zonder deze split zou het
+        tweede event het eerste overschrijven en zag je bij twee batterijen
+        de SoC van de laatst-binnengekomene op beide entities.
+        """
+        battery_id = payload.get("id")
+        if not battery_id:
+            _LOGGER.debug("battery-reading zonder id genegeerd: %s", payload)
+            return
+
+        self._record_fields(payload)
+        batteries = dict((self.data or {}).get("batteries") or {})
+        batteries[battery_id] = {**(batteries.get(battery_id) or {}), **payload}
+        # Meta bijhouden zodat een batterij die tijdens de probe ontbrak (net
+        # aangesloten) na een reload wél entities krijgt.
+        self._battery_meta.setdefault(battery_id, batteries[battery_id])
+
+        new_data = dict(self.data or {})
+        new_data["batteries"] = batteries
         self.async_set_updated_data(new_data)
 
     def _record_fields(self, payload: dict[str, Any]) -> None:

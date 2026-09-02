@@ -130,6 +130,51 @@ USAGE_SUFFIX_PRODUCED_TODAY = "usage_produced_today"
 USAGE_SUFFIX_OWN_CONSUMPTION_TODAY = "usage_own_consumption_today"
 USAGE_SUFFIX_GAS_TODAY = "usage_gas_today"
 
+# ----- Thuisbatterij (HA → SlimHuys, `POST /v1/me/battery/readings`) -----
+# Staat los van CONF_P1_MODE: een huis kan zijn P1 pushen én een batterij
+# hebben, of een batterij zonder P1-koppeling. Vandaar een eigen enable-vlag
+# in plaats van een vierde P1-mode.
+CONF_BATTERY_ENABLED = "battery_enabled"
+CONF_BATTERY_SOC = "battery_soc_sensor"
+CONF_BATTERY_POWER = "battery_power_sensor"
+# Alternatief voor CONF_BATTERY_POWER: twee altijd-positieve sensoren. Wordt
+# tot één signed waarde verrekend (laden − ontladen).
+CONF_BATTERY_CHARGE_POWER = "battery_charge_power_sensor"
+CONF_BATTERY_DISCHARGE_POWER = "battery_discharge_power_sensor"
+# HA-integraties zijn het onderling niet eens over het teken van een
+# batterij-vermogenssensor: sommige rapporteren ontladen positief. De API
+# hanteert + = laden, dus bied een expliciete omkering aan in plaats van te
+# gokken op merk of entity-naam.
+CONF_BATTERY_INVERT_POWER = "battery_invert_power"
+CONF_BATTERY_CHARGED_TOTAL = "battery_charged_total_sensor"
+CONF_BATTERY_DISCHARGED_TOTAL = "battery_discharged_total_sensor"
+CONF_BATTERY_MODE = "battery_mode_entity"
+CONF_BATTERY_TEMP = "battery_temp_sensor"
+CONF_BATTERY_PV_POWER = "battery_pv_power_sensor"
+CONF_BATTERY_INTERVAL = "battery_interval_seconds"
+# Metadata die met elke push meegaat; de API auto-provisiont hierop.
+CONF_BATTERY_NAME = "battery_name"
+CONF_BATTERY_BRAND = "battery_brand"
+CONF_BATTERY_MODEL = "battery_model"
+CONF_BATTERY_EXTERNAL_ID = "battery_external_id"
+CONF_BATTERY_CAPACITY = "battery_capacity_kwh"
+
+# Een omvormer publiceert veel trager dan een 1 Hz-P1-bridge (SEMS pollt de
+# GoodWe-cloud, Deye-modbus haalt ~5s). Ondergrens daarom 5s in plaats van de
+# 1s van MIN_P1_INTERVAL: sneller pushen levert alleen duplicaten op die de
+# API toch op (battery_id, timestamp_utc) wegupsert.
+DEFAULT_BATTERY_INTERVAL = 30
+MIN_BATTERY_INTERVAL = 5
+MAX_BATTERY_INTERVAL = 300
+
+# Sensor unique-id-suffixes voor pull-mode batterij-entities. Per batterij
+# gesuffixt met de battery-id, want een huis kan er meerdere hebben.
+BATTERY_SUFFIX_SOC = "battery_soc"
+BATTERY_SUFFIX_POWER = "battery_power"
+BATTERY_SUFFIX_STATE = "battery_state"
+BATTERY_SUFFIX_ENERGY = "battery_energy"
+BATTERY_SUFFIX_TEMP = "battery_temp"
+
 # Service names
 SERVICE_PUSH_READING = "push_reading"
 

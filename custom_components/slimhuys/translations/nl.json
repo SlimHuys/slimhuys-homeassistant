@@ -54,9 +54,34 @@
           "p1_power_returned_l3_sensor": "Vermogen L3 teruglevering (-P, W, optioneel)",
           "p1_gas_sensor": "Gas (m³ totaalstand, optioneel)"
         }
+      },
+      "battery": {
+        "title": "Thuisbatterij (optioneel)",
+        "description": "Push je thuisbatterij naar SlimHuys, zodat je daar laadtoestand, laden/ontladen en je dagbesparing ziet. Laat de schakelaar uit om deze stap over te slaan.\n\nKies óf één signed vermogenssensor, óf het aparte laden/ontladen-paar. Vul het serienummer in als je meerdere batterijen hebt (of krijgt) — daarmee worden ze uit elkaar gehouden.",
+        "data": {
+          "battery_enabled": "Batterij naar SlimHuys pushen",
+          "battery_soc_sensor": "Laadtoestand (%, verplicht)",
+          "battery_power_sensor": "Vermogen (signed, + = laden)",
+          "battery_charge_power_sensor": "Laadvermogen (alternatief, altijd ≥ 0)",
+          "battery_discharge_power_sensor": "Ontlaadvermogen (alternatief, altijd ≥ 0)",
+          "battery_charged_total_sensor": "Totaal geladen (kWh, cumulatief)",
+          "battery_discharged_total_sensor": "Totaal ontladen (kWh, cumulatief)",
+          "battery_temp_sensor": "Temperatuur",
+          "battery_pv_power_sensor": "Zon-input op de omvormer",
+          "battery_mode_entity": "Mode-/status-entiteit",
+          "battery_invert_power": "Vermogen omkeren (mijn sensor is positief bij ontladen)",
+          "battery_interval_seconds": "Push-interval (seconden, min 5)",
+          "battery_name": "Naam",
+          "battery_brand": "Merk (bijv. goodwe, deye)",
+          "battery_model": "Model",
+          "battery_external_id": "Serienummer / omvormer-SN",
+          "battery_capacity_kwh": "Bruikbare capaciteit (kWh)"
+        }
       }
     },
     "error": {
+      "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
+      "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
       "invalid_auth": "API-key is ongeldig of ingetrokken.",
       "cannot_connect": "Kan SlimHuys niet bereiken — controleer de basis-URL en je internet."
     },
@@ -101,6 +126,29 @@
           "p1_power_returned_l2_sensor": "Vermogen L2 teruglevering (-P, W, optioneel)",
           "p1_power_returned_l3_sensor": "Vermogen L3 teruglevering (-P, W, optioneel)",
           "p1_gas_sensor": "Gas (m³ totaalstand, optioneel)"
+        }
+      },
+      "battery": {
+        "title": "Thuisbatterij (optioneel)",
+        "description": "Push je thuisbatterij naar SlimHuys, zodat je daar laadtoestand, laden/ontladen en je dagbesparing ziet. Laat de schakelaar uit om deze stap over te slaan.\n\nKies óf één signed vermogenssensor, óf het aparte laden/ontladen-paar. Vul het serienummer in als je meerdere batterijen hebt (of krijgt) — daarmee worden ze uit elkaar gehouden.",
+        "data": {
+          "battery_enabled": "Batterij naar SlimHuys pushen",
+          "battery_soc_sensor": "Laadtoestand (%, verplicht)",
+          "battery_power_sensor": "Vermogen (signed, + = laden)",
+          "battery_charge_power_sensor": "Laadvermogen (alternatief, altijd ≥ 0)",
+          "battery_discharge_power_sensor": "Ontlaadvermogen (alternatief, altijd ≥ 0)",
+          "battery_charged_total_sensor": "Totaal geladen (kWh, cumulatief)",
+          "battery_discharged_total_sensor": "Totaal ontladen (kWh, cumulatief)",
+          "battery_temp_sensor": "Temperatuur",
+          "battery_pv_power_sensor": "Zon-input op de omvormer",
+          "battery_mode_entity": "Mode-/status-entiteit",
+          "battery_invert_power": "Vermogen omkeren (mijn sensor is positief bij ontladen)",
+          "battery_interval_seconds": "Push-interval (seconden, min 5)",
+          "battery_name": "Naam",
+          "battery_brand": "Merk (bijv. goodwe, deye)",
+          "battery_model": "Model",
+          "battery_external_id": "Serienummer / omvormer-SN",
+          "battery_capacity_kwh": "Bruikbare capaciteit (kWh)"
         }
       }
     }

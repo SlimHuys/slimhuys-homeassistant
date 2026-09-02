@@ -9,6 +9,8 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -18,6 +20,23 @@ from .api import SlimHuysApiError, SlimHuysAuthError, SlimHuysClient
 from .const import (
     CONF_API_KEY,
     CONF_BASE_URL,
+    CONF_BATTERY_BRAND,
+    CONF_BATTERY_CAPACITY,
+    CONF_BATTERY_CHARGE_POWER,
+    CONF_BATTERY_CHARGED_TOTAL,
+    CONF_BATTERY_DISCHARGE_POWER,
+    CONF_BATTERY_DISCHARGED_TOTAL,
+    CONF_BATTERY_ENABLED,
+    CONF_BATTERY_EXTERNAL_ID,
+    CONF_BATTERY_INTERVAL,
+    CONF_BATTERY_INVERT_POWER,
+    CONF_BATTERY_MODE,
+    CONF_BATTERY_MODEL,
+    CONF_BATTERY_NAME,
+    CONF_BATTERY_POWER,
+    CONF_BATTERY_PV_POWER,
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_TEMP,
     CONF_P1_CONSUMPTION,
     CONF_P1_CURRENT_L1,
     CONF_P1_CURRENT_L2,
@@ -42,12 +61,15 @@ from .const import (
     CONF_PULL_PROBE_AT_SETUP,
     CONF_SUPPLIER,
     DEFAULT_BASE_URL,
+    DEFAULT_BATTERY_INTERVAL,
     DEFAULT_P1_INTERVAL,
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
     DEFAULT_SUPPLIER,
     DOMAIN,
+    MAX_BATTERY_INTERVAL,
     MAX_P1_INTERVAL,
+    MIN_BATTERY_INTERVAL,
     MIN_P1_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
@@ -240,8 +262,145 @@ def _add_optional_phase_fields(
         schema_dict[vol.Optional(CONF_P1_GAS, default=default)] = vol.In({**gas_choices, "": "—"})
 
 
+
+# ---------- Thuisbatterij ----------
+
+# Alle batterij-velden waarvan de waarde een entity-id is. Gedeeld door
+# Config- en OptionsFlow zodat de twee niet uit elkaar kunnen lopen.
+BATTERY_ENTITY_FIELDS = (
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_POWER,
+    CONF_BATTERY_CHARGE_POWER,
+    CONF_BATTERY_DISCHARGE_POWER,
+    CONF_BATTERY_CHARGED_TOTAL,
+    CONF_BATTERY_DISCHARGED_TOTAL,
+    CONF_BATTERY_MODE,
+    CONF_BATTERY_TEMP,
+    CONF_BATTERY_PV_POWER,
+)
+
+BATTERY_TEXT_FIELDS = (
+    CONF_BATTERY_NAME,
+    CONF_BATTERY_BRAND,
+    CONF_BATTERY_MODEL,
+    CONF_BATTERY_EXTERNAL_ID,
+)
+
+
+def _has_battery_candidates(hass) -> bool:
+    """Is er iets dat op een thuisbatterij lijkt? Zo nee, stap overslaan.
+
+    Kijkt naar een SoC-sensor: `device_class: battery` met unit `%`. Dat
+    matcht ook telefoon- en sensor-batterijen, maar die vals-positieven
+    kosten alleen een extra (optioneel) scherm — een vals-negatief zou de
+    stap onbereikbaar maken voor wie 'm juist nodig heeft.
+    """
+    for state in hass.states.async_all("sensor"):
+        device_class = (state.attributes.get("device_class") or "").lower()
+        unit = (state.attributes.get("unit_of_measurement") or "").lower()
+        if device_class == "battery" and unit == "%":
+            return True
+    return False
+
+
+def _battery_schema(defaults: dict | None = None) -> dict:
+    """Schema-dict voor de batterij-stap.
+
+    Bewust `EntitySelector` in plaats van de `vol.In`-dropdowns die de
+    P1-stap gebruikt: die bouwen hun keuzelijst uit `hass.states`, en een
+    entity die tijdens setup `unavailable` is staat er dan niet in. Precies
+    het geval bij een omvormer die 's nachts slaapt of een cloud-integratie
+    die nog niet gepold heeft.
+    """
+    defaults = defaults or {}
+
+    def _prefill(key):
+        # `description.suggested_value` i.p.v. `default`: laat het veld leeg
+        # als er niets bewaard is, en laat de gebruiker een bestaande keuze
+        # wissen door 'm leeg te maken (een `default` zou 'm terugzetten).
+        value = defaults.get(key)
+        return {"suggested_value": value} if value else {}
+
+    def _entity(key, **cfg):
+        return (
+            vol.Optional(key, description=_prefill(key)),
+            EntitySelector(EntitySelectorConfig(**cfg)),
+        )
+
+    schema: dict = {
+        vol.Required(
+            CONF_BATTERY_ENABLED,
+            default=bool(defaults.get(CONF_BATTERY_ENABLED, False)),
+        ): bool,
+    }
+    for key, selector in [
+        _entity(CONF_BATTERY_SOC, domain="sensor", device_class="battery"),
+        _entity(CONF_BATTERY_POWER, domain="sensor", device_class="power"),
+        _entity(CONF_BATTERY_CHARGE_POWER, domain="sensor", device_class="power"),
+        _entity(CONF_BATTERY_DISCHARGE_POWER, domain="sensor", device_class="power"),
+        _entity(CONF_BATTERY_CHARGED_TOTAL, domain="sensor", device_class="energy"),
+        _entity(CONF_BATTERY_DISCHARGED_TOTAL, domain="sensor", device_class="energy"),
+        _entity(CONF_BATTERY_TEMP, domain="sensor", device_class="temperature"),
+        _entity(CONF_BATTERY_PV_POWER, domain="sensor", device_class="power"),
+        _entity(CONF_BATTERY_MODE, domain=["sensor", "select"]),
+    ]:
+        schema[key] = selector
+
+    schema[vol.Required(
+        CONF_BATTERY_INVERT_POWER,
+        default=bool(defaults.get(CONF_BATTERY_INVERT_POWER, False)),
+    )] = bool
+    schema[vol.Optional(
+        CONF_BATTERY_INTERVAL,
+        default=max(MIN_BATTERY_INTERVAL, min(MAX_BATTERY_INTERVAL, int(
+            defaults.get(CONF_BATTERY_INTERVAL, DEFAULT_BATTERY_INTERVAL)
+        ))),
+    )] = vol.All(vol.Coerce(int), vol.Range(min=MIN_BATTERY_INTERVAL, max=MAX_BATTERY_INTERVAL))
+
+    for key in BATTERY_TEXT_FIELDS:
+        value = defaults.get(key)
+        schema[vol.Optional(
+            key, description={"suggested_value": value} if value else {}
+        )] = str
+    capacity = defaults.get(CONF_BATTERY_CAPACITY)
+    schema[vol.Optional(
+        CONF_BATTERY_CAPACITY,
+        description={"suggested_value": capacity} if capacity else {},
+    )] = vol.All(vol.Coerce(float), vol.Range(min=0, max=1000))
+    return schema
+
+
+def _validate_battery(user_input: dict) -> tuple[dict, dict]:
+    """→ (opgeschoonde config, errors). Leeg dict aan config = uitgeschakeld."""
+    if not user_input.get(CONF_BATTERY_ENABLED):
+        # Uitgeschakeld: bewaar de vlag, gooi de rest niet weg — wie 'm later
+        # weer aanzet vindt zijn entity-keuzes terug.
+        cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+        cleaned[CONF_BATTERY_ENABLED] = False
+        return cleaned, {}
+
+    errors: dict[str, str] = {}
+    if not user_input.get(CONF_BATTERY_SOC):
+        errors[CONF_BATTERY_SOC] = "battery_soc_required"
+    has_signed = bool(user_input.get(CONF_BATTERY_POWER))
+    has_split = bool(
+        user_input.get(CONF_BATTERY_CHARGE_POWER)
+        or user_input.get(CONF_BATTERY_DISCHARGE_POWER)
+    )
+    if not (has_signed or has_split):
+        errors[CONF_BATTERY_POWER] = "battery_power_required"
+    if errors:
+        return {}, errors
+
+    cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+    cleaned[CONF_BATTERY_ENABLED] = True
+    return cleaned, {}
+
+
 class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Multi-step setup wizard."""
+
+    _p1_data: dict[str, Any] = {}
 
     VERSION = 2
 
@@ -320,7 +479,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_p1_pull()
             if self._mode == P1_MODE_PUSH:
                 return await self.async_step_p1_push()
-            return self._finish_entry({CONF_P1_MODE: P1_MODE_NONE})
+            return await self._continue_to_battery({CONF_P1_MODE: P1_MODE_NONE})
 
         default_mode = P1_MODE_PULL if self._has_p1_meter else P1_MODE_PUSH
         return self.async_show_form(
@@ -340,7 +499,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_p1_pull(self, user_input: dict[str, Any] | None = None):
         """Stap 4a (pull-mode): polling-fallback + probe-toggles. Geen DSMR-dropdowns."""
         if user_input is not None:
-            return self._finish_entry({
+            return await self._continue_to_battery({
                 CONF_P1_MODE: P1_MODE_PULL,
                 CONF_PULL_POLL_FALLBACK: bool(user_input.get(
                     CONF_PULL_POLL_FALLBACK, DEFAULT_PULL_POLL_FALLBACK
@@ -382,7 +541,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 if user_input.get(opt_key):
                     data[opt_key] = user_input[opt_key]
-            return self._finish_entry(data)
+            return await self._continue_to_battery(data)
 
         suggestions = _detect_dsmr_sensors(self.hass)
         energy_sensors = _energy_sensors(self.hass)
@@ -432,6 +591,31 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def _continue_to_battery(self, p1_data: dict[str, Any]):
+        """Laatste stap, ongeacht P1-mode — een batterij staat daar los van.
+
+        Geen batterij-achtige sensor in dit huis? Dan de stap overslaan; een
+        leeg formulier is alleen maar een extra klik in de wizard.
+        """
+        self._p1_data = p1_data
+        if not _has_battery_candidates(self.hass):
+            return self._finish_entry(p1_data)
+        return await self.async_step_battery()
+
+    async def async_step_battery(self, user_input: dict[str, Any] | None = None):
+        """Stap 5: thuisbatterij → SlimHuys (optioneel)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            battery_data, errors = _validate_battery(user_input)
+            if not errors:
+                return self._finish_entry({**self._p1_data, **battery_data})
+
+        return self.async_show_form(
+            step_id="battery",
+            data_schema=vol.Schema(_battery_schema(user_input or {})),
+            errors=errors,
+        )
+
     def _finish_entry(self, p1_data: dict[str, Any]):
         return self.async_create_entry(
             title=f"SlimHuys ({self._user_email})",
@@ -460,6 +644,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
     def __init__(self) -> None:
         self._supplier_choice: str | None = None
         self._mode_choice: str | None = None
+        self._p1_data: dict[str, Any] = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Stap 1: leverancier + mode in één form."""
@@ -489,7 +674,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_p1_pull()
             if self._mode_choice == P1_MODE_PUSH:
                 return await self.async_step_p1_push()
-            return self._save_options({})
+            return await self._continue_to_battery({})
 
         current_supplier = get(CONF_SUPPLIER, DEFAULT_SUPPLIER)
         current_mode = get(CONF_P1_MODE, P1_MODE_PUSH if get(CONF_P1_ENABLED) else P1_MODE_NONE)
@@ -508,7 +693,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_p1_pull(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
-            return self._save_options({
+            return await self._continue_to_battery({
                 CONF_PULL_POLL_FALLBACK: bool(user_input.get(
                     CONF_PULL_POLL_FALLBACK, DEFAULT_PULL_POLL_FALLBACK
                 )),
@@ -545,7 +730,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             cleaned = {k: v for k, v in user_input.items() if v != ""}
             cleaned[CONF_P1_ENABLED] = True
-            return self._save_options(cleaned)
+            return await self._continue_to_battery(cleaned)
 
         energy_sensors = _energy_sensors(self.hass)
         power_sensors = _power_sensors(self.hass)
@@ -600,6 +785,43 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="p1_push",
             data_schema=vol.Schema(schema_dict),
+        )
+
+    async def _continue_to_battery(self, p1_data: dict[str, Any]):
+        self._p1_data = p1_data
+        # Anders dan bij de eerste setup slaan we de stap niet over als er
+        # geen kandidaat-sensor is: wie de batterij ooit ingesteld heeft moet
+        # 'm ook kunnen uitzetten wanneer de omvormer offline staat.
+        entry = self.config_entry
+        configured = entry.options.get(
+            CONF_BATTERY_ENABLED, entry.data.get(CONF_BATTERY_ENABLED, False)
+        )
+        if not configured and not _has_battery_candidates(self.hass):
+            return self._save_options(p1_data)
+        return await self.async_step_battery()
+
+    async def async_step_battery(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            battery_data, errors = _validate_battery(user_input)
+            if not errors:
+                return self._save_options({**self._p1_data, **battery_data})
+
+        entry = self.config_entry
+
+        def get(key, default=None):
+            return entry.options.get(key, entry.data.get(key, default))
+
+        defaults = user_input or {
+            k: v for k in (
+                CONF_BATTERY_ENABLED, CONF_BATTERY_INVERT_POWER, CONF_BATTERY_INTERVAL,
+                CONF_BATTERY_CAPACITY, *BATTERY_ENTITY_FIELDS, *BATTERY_TEXT_FIELDS,
+            ) if (v := get(k)) is not None
+        }
+        return self.async_show_form(
+            step_id="battery",
+            data_schema=vol.Schema(_battery_schema(defaults)),
+            errors=errors,
         )
 
     def _save_options(self, p1_data: dict[str, Any]):

@@ -28,6 +28,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    BATTERY_SUFFIX_ENERGY,
+    BATTERY_SUFFIX_POWER,
+    BATTERY_SUFFIX_SOC,
+    BATTERY_SUFFIX_STATE,
+    BATTERY_SUFFIX_TEMP,
     DOMAIN,
     LIVE_SUFFIX_ACTIVE_POWER,
     LIVE_SUFFIX_ACTIVE_POWER_RETURNED,
@@ -192,6 +197,16 @@ def _build_live_entities(
         out.append(LiveTemperatureSensor(coordinator, entry, supplier))
     if _has("humid_pct"):
         out.append(LiveHumiditySensor(coordinator, entry, supplier))
+
+    # Eén set per batterij die de probe zag. `temp_c` alleen als de omvormer
+    # 'm publiceert — lang niet elke batterij doet dat.
+    for battery in coordinator.batteries:
+        out.append(BatterySocSensor(coordinator, entry, battery))
+        out.append(BatteryPowerSensor(coordinator, entry, battery))
+        out.append(BatteryStateSensor(coordinator, entry, battery))
+        out.append(BatteryEnergySensor(coordinator, entry, battery))
+        if battery.get("temp_c") is not None:
+            out.append(BatteryTemperatureSensor(coordinator, entry, battery))
     return out
 
 
@@ -1263,3 +1278,148 @@ class UsageGasTodaySensor(_UsageBaseSensor):
 
     def __init__(self, coordinator, entry, supplier):
         super().__init__(coordinator, entry, supplier, USAGE_SUFFIX_GAS_TODAY, "Gasverbruik vandaag")
+
+
+# ---------- Thuisbatterij (pull-mode, `battery-reading`-events) ----------
+
+
+class _BatteryBaseSensor(CoordinatorEntity[SlimHuysLiveCoordinator], SensorEntity):
+    """Base voor batterij-entities — leest `data["batteries"][battery_id]`.
+
+    Elke batterij wordt een eigen HA-device (via_device onder de SlimHuys-
+    entry) in plaats van nóg een reeks entities op het prijs-device: een huis
+    kan meerdere batterijen hebben en die horen in de UI niet op één hoop.
+    """
+
+    _attr_has_entity_name = True
+    _field: str = ""
+
+    def __init__(
+        self,
+        coordinator: SlimHuysLiveCoordinator,
+        entry: ConfigEntry,
+        battery: dict[str, Any],
+        unique_suffix: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery["id"]
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}_{self._battery_id}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_battery_{self._battery_id}")},
+            "via_device": (DOMAIN, entry.entry_id),
+            "name": battery.get("name") or "Thuisbatterij",
+            "manufacturer": (battery.get("brand") or "SlimHuys.nl").title(),
+            "model": battery.get("model") or "Thuisbatterij",
+            "configuration_url": "https://slimhuys.nl/app/batterij",
+        }
+
+    def _read(self, key: str | None = None) -> Any:
+        batteries = (self.coordinator.data or {}).get("batteries") or {}
+        return (batteries.get(self._battery_id) or {}).get(key or self._field)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._read() is not None
+
+    @property
+    def native_value(self) -> Any:
+        return self._read()
+
+
+class BatterySocSensor(_BatteryBaseSensor):
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+    _field = "soc_pct"
+
+    def __init__(self, coordinator, entry, battery):
+        super().__init__(coordinator, entry, battery, BATTERY_SUFFIX_SOC, "Laadtoestand")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
+class BatteryPowerSensor(_BatteryBaseSensor):
+    """Signed vermogen, API-conventie: positief = laden, negatief = ontladen."""
+
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:battery-charging"
+    _field = "power_w"
+
+    def __init__(self, coordinator, entry, battery):
+        super().__init__(coordinator, entry, battery, BATTERY_SUFFIX_POWER, "Vermogen")
+
+    @property
+    def native_value(self) -> int | None:
+        v = self._read()
+        return int(v) if v is not None else None
+
+
+class BatteryStateSensor(_BatteryBaseSensor):
+    """`charging` / `discharging` / `idle` — door de API afgeleid, niet hier.
+
+    Bewust niet zelf uit `power_w` berekend: de API hanteert een dode zone van
+    ±25 W zodat standby-verbruik van de omvormer de status niet laat knipperen,
+    en die drempel hoort op één plek te staan.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["charging", "discharging", "idle"]
+    _attr_icon = "mdi:battery-sync"
+    _field = "state"
+
+    def __init__(self, coordinator, entry, battery):
+        super().__init__(coordinator, entry, battery, BATTERY_SUFFIX_STATE, "Status")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        today = self._read("today")
+        if not today:
+            return None
+        return {
+            "charged_today_kwh": today.get("charged_kwh"),
+            "discharged_today_kwh": today.get("discharged_kwh"),
+            "cycles_today": today.get("cycles"),
+            "saved_eur_today": today.get("saved_eur"),
+            "mode": self._read("mode"),
+        }
+
+
+class BatteryEnergySensor(_BatteryBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:battery-high"
+    _field = "energy_kwh"
+
+    def __init__(self, coordinator, entry, battery):
+        super().__init__(coordinator, entry, battery, BATTERY_SUFFIX_ENERGY, "Inhoud")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None
+
+
+class BatteryTemperatureSensor(_BatteryBaseSensor):
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+    _field = "temp_c"
+
+    def __init__(self, coordinator, entry, battery):
+        super().__init__(coordinator, entry, battery, BATTERY_SUFFIX_TEMP, "Temperatuur")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self._read()
+        return float(v) if v is not None else None

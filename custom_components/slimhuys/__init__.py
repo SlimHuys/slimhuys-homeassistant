@@ -16,6 +16,26 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 
 from .api import SlimHuysApiError, SlimHuysClient
 from .const import (
+    CONF_BATTERY_BRAND,
+    CONF_BATTERY_CAPACITY,
+    CONF_BATTERY_CHARGE_POWER,
+    CONF_BATTERY_CHARGED_TOTAL,
+    CONF_BATTERY_DISCHARGE_POWER,
+    CONF_BATTERY_DISCHARGED_TOTAL,
+    CONF_BATTERY_ENABLED,
+    CONF_BATTERY_EXTERNAL_ID,
+    CONF_BATTERY_INTERVAL,
+    CONF_BATTERY_INVERT_POWER,
+    CONF_BATTERY_MODE,
+    CONF_BATTERY_MODEL,
+    CONF_BATTERY_NAME,
+    CONF_BATTERY_POWER,
+    CONF_BATTERY_PV_POWER,
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_TEMP,
+    DEFAULT_BATTERY_INTERVAL,
+    MAX_BATTERY_INTERVAL,
+    MIN_BATTERY_INTERVAL,
     CONF_API_KEY,
     CONF_BASE_URL,
     CONF_P1_CONSUMPTION,
@@ -167,6 +187,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "mode": mode,
         "p1_unsub": None,
         "p1_pending_unsub": None,
+        "battery_unsub": None,
+        "battery_pending_unsub": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -178,6 +200,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if mode == P1_MODE_PUSH:
         # P1-auto-push: state-change-driven (event-driven ipv polling).
         _maybe_start_p1_push(hass, entry)
+
+    # Batterij-push staat los van de P1-mode — ook een pull- of none-huis kan
+    # een thuisbatterij hebben die HA wél ziet en SlimHuys niet.
+    _maybe_start_battery_push(hass, entry)
 
     # Service push_reading: voor users die liever zelf via automation pushen
     if not hass.services.has_service(DOMAIN, SERVICE_PUSH_READING):
@@ -223,6 +249,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["p1_unsub"]()
     if state.get("p1_pending_unsub"):
         state["p1_pending_unsub"]()
+    if state.get("battery_unsub"):
+        state["battery_unsub"]()
+    if state.get("battery_pending_unsub"):
+        state["battery_pending_unsub"]()
     live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
     if live is not None:
         await live.async_stop()
@@ -415,6 +445,204 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     ) if s]
 
     state["p1_unsub"] = async_track_state_change_event(
+        hass, sensors_to_watch, _on_state_change
+    )
+
+
+def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Thuisbatterij → `POST /v1/me/battery/readings`, state-change-driven.
+
+    Zelfde throttle/backoff-patroon als `_maybe_start_p1_push`, maar met een
+    eigen window: een omvormer publiceert veel trager dan een 1 Hz-P1-bridge,
+    dus de ondergrens is 5s in plaats van 1s.
+    """
+    def _get(key, default=None):
+        return entry.options.get(key, entry.data.get(key, default))
+
+    if not _get(CONF_BATTERY_ENABLED, False):
+        return
+
+    soc = _get(CONF_BATTERY_SOC)
+    power = _get(CONF_BATTERY_POWER)
+    charge_power = _get(CONF_BATTERY_CHARGE_POWER)
+    discharge_power = _get(CONF_BATTERY_DISCHARGE_POWER)
+    if not soc or not (power or charge_power or discharge_power):
+        _LOGGER.warning(
+            "Batterij-push staat aan maar mist SoC- of vermogenssensor; overgeslagen"
+        )
+        return
+
+    invert = bool(_get(CONF_BATTERY_INVERT_POWER, False))
+    charged_total = _get(CONF_BATTERY_CHARGED_TOTAL)
+    discharged_total = _get(CONF_BATTERY_DISCHARGED_TOTAL)
+    mode_entity = _get(CONF_BATTERY_MODE)
+    temp = _get(CONF_BATTERY_TEMP)
+    pv_power = _get(CONF_BATTERY_PV_POWER)
+    interval = max(
+        MIN_BATTERY_INTERVAL,
+        min(MAX_BATTERY_INTERVAL, int(_get(CONF_BATTERY_INTERVAL, DEFAULT_BATTERY_INTERVAL))),
+    )
+
+    # Metadata mag bij elke push mee — de API schrijft 'm alleen weg als er
+    # iets verandert. `external_id` gaat altijd mee als 'ie ingevuld is: dat
+    # is wat straks een tweede batterij van de eerste onderscheidt, en een
+    # push mét serienummer adopteert de bestaande rij zonder.
+    battery_meta = {
+        key: value
+        for key, value in (
+            ("external_id", _get(CONF_BATTERY_EXTERNAL_ID)),
+            ("name", _get(CONF_BATTERY_NAME)),
+            ("brand", _get(CONF_BATTERY_BRAND)),
+            ("model", _get(CONF_BATTERY_MODEL)),
+            ("capacity_kwh", _get(CONF_BATTERY_CAPACITY)),
+        )
+        if value not in (None, "")
+    }
+
+    state = hass.data[DOMAIN][entry.entry_id]
+    client: SlimHuysClient = state["client"]
+    push_state = {
+        "last_attempt": 0.0, "failures": 0, "in_flight": False, "stopped": False,
+    }
+
+    def _current_interval() -> float:
+        if not push_state["failures"]:
+            return float(interval)
+        return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
+
+    def _read_float(entity_id: str | None) -> float | None:
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            return float(s.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _read_power_w(entity_id: str | None) -> int | None:
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ("kw", "kilowatt"):
+            value *= 1000
+        return int(round(value))
+
+    def _signed_power_w() -> int | None:
+        """API-conventie: positief = laden.
+
+        Twee bronvormen. Eén signed sensor (GoodWe, Deye) — met een optionele
+        omkering, want HA-integraties zijn het niet eens over welke kant
+        positief is. Of twee altijd-positieve sensoren, die we hier tot één
+        signed waarde verrekenen.
+        """
+        if power:
+            value = _read_power_w(power)
+            if value is None:
+                return None
+            return -value if invert else value
+
+        charging = _read_power_w(charge_power)
+        discharging = _read_power_w(discharge_power)
+        if charging is None and discharging is None:
+            return None
+        return (charging or 0) - (discharging or 0)
+
+    async def _do_push(_now=None) -> None:
+        state["battery_pending_unsub"] = None
+        if push_state["in_flight"] or push_state["stopped"]:
+            return
+
+        soc_pct = _read_float(soc)
+        power_w = _signed_power_w()
+        if soc_pct is None or power_w is None:
+            return  # verplichte velden ontbreken; niets doorzetten
+
+        payload: dict[str, Any] = {
+            "timestamp": _now_iso(),
+            "soc_pct": round(soc_pct, 2),
+            "power_w": power_w,
+        }
+        for key, eid in (
+            ("charged_kwh_total", charged_total),
+            ("discharged_kwh_total", discharged_total),
+            ("temp_c", temp),
+        ):
+            value = _read_float(eid)
+            if value is not None:
+                payload[key] = value
+        pv = _read_power_w(pv_power)
+        if pv is not None:
+            payload["pv_power_w"] = pv
+        if mode_entity:
+            mode_state = hass.states.get(mode_entity)
+            if mode_state and mode_state.state not in ("unknown", "unavailable", None):
+                payload["mode"] = str(mode_state.state)[:24]
+
+        push_state["in_flight"] = True
+        push_state["last_attempt"] = monotonic()
+        try:
+            await client.push_battery_readings([payload], battery_meta or None)
+            if push_state["failures"]:
+                _LOGGER.debug(
+                    "SlimHuys batterij-push hersteld na %d fouten", push_state["failures"]
+                )
+                push_state["failures"] = 0
+        except SlimHuysApiError as err:
+            # 422 ambiguous-battery is geen storing maar een configuratiefout:
+            # meerdere batterijen in het huis en geen serienummer om ze uit
+            # elkaar te houden. Blijven retryen lost dat nooit op en zou elke
+            # state-change een mislukte POST kosten, dus stoppen we tot de
+            # gebruiker een external_id invult (reload = nieuwe kans).
+            if "ambiguous-battery" in str(err):
+                push_state["stopped"] = True
+                _LOGGER.error(
+                    "SlimHuys kent meerdere batterijen voor dit huis en kan deze push "
+                    "niet toewijzen. Vul het serienummer (external_id) in bij de "
+                    "SlimHuys-opties; batterij-push is tot die tijd gestopt."
+                )
+                return
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.debug(
+                "SlimHuys batterij-push faalde (poging %d, volgende over %.0fs): %s",
+                push_state["failures"], _current_interval(), err,
+            )
+        except Exception as err:  # noqa: BLE001
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.warning("Onverwachte fout in batterij-push: %s", err)
+        finally:
+            push_state["in_flight"] = False
+
+    @callback
+    def _on_state_change(_event) -> None:
+        if (
+            push_state["in_flight"]
+            or push_state["stopped"]
+            or state.get("battery_pending_unsub") is not None
+        ):
+            return
+        window = _current_interval()
+        elapsed = monotonic() - push_state["last_attempt"]
+        if elapsed >= window:
+            hass.async_create_task(_do_push())
+        else:
+            delay = max(0.1, window - elapsed)
+            state["battery_pending_unsub"] = async_call_later(hass, delay, _do_push)
+
+    sensors_to_watch = [e for e in (
+        soc, power, charge_power, discharge_power,
+        charged_total, discharged_total, mode_entity, temp, pv_power,
+    ) if e]
+
+    state["battery_unsub"] = async_track_state_change_event(
         hass, sensors_to_watch, _on_state_change
     )
 

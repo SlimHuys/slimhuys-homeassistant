@@ -138,14 +138,13 @@ uitleest. Sinds v1.11.0 kun je die opwek dus net als je P1 en je batterij
 zelf pushen.
 
 Instellen via **Instellingen → Apparaten & diensten → SlimHuys → Opties →
-Zonnepanelen**. De stap verschijnt zodra HA een W-, kW- of kWh-sensor kent
-waarvan de naam naar zon verwijst (`solar`, `pv`, `zonnepanelen`, `omvormer`,
-`inverter`, `opwek`).
+Zonnepanelen**. De stap staat er altijd; laat de schakelaar uit als je 'm niet
+gebruikt.
 
 | Veld | Verplicht | Opmerking |
 |---|---|---|
-| Opwek nu | ja¹ | W of kW |
-| Totaal opgewekt | ja¹ | levenslange kWh-teller; aanbevolen |
+| Opwek nu | ja¹ | vermogen op dit moment, W of kW (Huawei: `active_power`) |
+| Totaal opgewekt | ja¹ | teller sinds de installatie, kWh (Huawei: `e_total`) — géén dagteller als `e_day`, die springt 's nachts terug op 0 |
 | Installatie-id | nee | pas nodig bij een tweede installatie |
 | Naam, kWp | nee | kWp voedt de opbrengst-voorspelling op slimhuys.nl |
 

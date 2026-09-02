@@ -80,11 +80,11 @@
       },
       "solar": {
         "title": "Solar panels (optional)",
-        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
+        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nPick the power sensor that shows what the panels do *right now* (Huawei: `active_power`, not `e_day`), and for the counter the *lifetime* total (Huawei: `e_total`) — a daily counter resets at midnight and gives wrong numbers.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
         "data": {
           "solar_enabled": "Push solar to SlimHuys",
-          "solar_power_sensor": "Current production (W or kW)",
-          "solar_total_sensor": "Total produced (kWh, cumulative — recommended)",
+          "solar_power_sensor": "Current production (power right now, W or kW)",
+          "solar_total_sensor": "Total produced ever (kWh, counter that never resets — recommended)",
           "solar_interval_seconds": "Push interval (seconds, min 1)",
           "solar_name": "Name",
           "solar_external_id": "Installation id (when you have more than one)",
@@ -167,11 +167,11 @@
       },
       "solar": {
         "title": "Solar panels (optional)",
-        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
+        "description": "Push your production to SlimHuys so `opwek_vandaag` and `eigen_verbruik_vandaag` get filled. Leave the toggle off to skip.\n\nAlready linked your inverter to SlimHuys (GoodWe, SolarEdge or Enphase)? Leave this off — two sources for the same panels add up to double, and the API rejects the push.\n\nPick the power sensor that shows what the panels do *right now* (Huawei: `active_power`, not `e_day`), and for the counter the *lifetime* total (Huawei: `e_total`) — a daily counter resets at midnight and gives wrong numbers.\n\nThe kWh counter is optional but gives the most accurate numbers; without it SlimHuys derives production from power.",
         "data": {
           "solar_enabled": "Push solar to SlimHuys",
-          "solar_power_sensor": "Current production (W or kW)",
-          "solar_total_sensor": "Total produced (kWh, cumulative — recommended)",
+          "solar_power_sensor": "Current production (power right now, W or kW)",
+          "solar_total_sensor": "Total produced ever (kWh, counter that never resets — recommended)",
           "solar_interval_seconds": "Push interval (seconds, min 1)",
           "solar_name": "Name",
           "solar_external_id": "Installation id (when you have more than one)",

@@ -80,11 +80,11 @@
       },
       "solar": {
         "title": "Zonnepanelen (optioneel)",
-        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
+        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nKies bij het vermogen de sensor die laat zien wat de panelen *nu* doen (Huawei: `active_power`, niet `e_day`), en bij de teller de stand *sinds de installatie* (Huawei: `e_total`) — een dagteller springt 's nachts terug op 0 en levert verkeerde cijfers.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
         "data": {
           "solar_enabled": "Zonnepanelen naar SlimHuys pushen",
-          "solar_power_sensor": "Opwek nu (W of kW)",
-          "solar_total_sensor": "Totaal opgewekt (kWh, cumulatief — aanbevolen)",
+          "solar_power_sensor": "Opwek nu (vermogen op dit moment, W of kW)",
+          "solar_total_sensor": "Totaal ooit opgewekt (kWh, teller die nooit terugloopt — aanbevolen)",
           "solar_interval_seconds": "Push-interval (seconden, min 1)",
           "solar_name": "Naam",
           "solar_external_id": "Installatie-id (bij meerdere installaties)",
@@ -167,11 +167,11 @@
       },
       "solar": {
         "title": "Zonnepanelen (optioneel)",
-        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
+        "description": "Push je opwek naar SlimHuys, zodat `opwek_vandaag` en `eigen_verbruik_vandaag` gevuld worden. Laat de schakelaar uit om deze stap over te slaan.\n\nHeb je je omvormer al aan SlimHuys gekoppeld (GoodWe, SolarEdge of Enphase)? Laat dit dan uit — twee bronnen voor dezelfde panelen tellen dubbel, en de API weigert de push.\n\nKies bij het vermogen de sensor die laat zien wat de panelen *nu* doen (Huawei: `active_power`, niet `e_day`), en bij de teller de stand *sinds de installatie* (Huawei: `e_total`) — een dagteller springt 's nachts terug op 0 en levert verkeerde cijfers.\n\nDe kWh-teller is optioneel maar levert de nauwkeurigste cijfers; zonder teller rekent SlimHuys de opwek uit het vermogen.",
         "data": {
           "solar_enabled": "Zonnepanelen naar SlimHuys pushen",
-          "solar_power_sensor": "Opwek nu (W of kW)",
-          "solar_total_sensor": "Totaal opgewekt (kWh, cumulatief — aanbevolen)",
+          "solar_power_sensor": "Opwek nu (vermogen op dit moment, W of kW)",
+          "solar_total_sensor": "Totaal ooit opgewekt (kWh, teller die nooit terugloopt — aanbevolen)",
           "solar_interval_seconds": "Push-interval (seconden, min 1)",
           "solar_name": "Naam",
           "solar_external_id": "Installatie-id (bij meerdere installaties)",

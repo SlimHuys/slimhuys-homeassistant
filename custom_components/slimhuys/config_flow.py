@@ -437,36 +437,15 @@ SOLAR_TEXT_FIELDS = (
     CONF_SOLAR_EXTERNAL_ID,
 )
 
-# Naam-hints voor een PV-sensor. Net als bij de batterij bewust ruim: een
-# vals-positief kost één extra (optioneel) scherm, een vals-negatief maakt de
-# stap onbereikbaar voor wie 'm juist nodig heeft. `pv` staat er als los woord
-# in — als substring matcht 'ie op van alles ("pv" in "supply").
-_SOLAR_NAME_HINTS = (
-    "solar", "zonnepaneel", "zonnepanelen", "zon_", "omvormer", "inverter",
-    "opwek", "photovoltaic",
-)
-_SOLAR_WORD_HINTS = ("pv",)
-
-
-def _has_solar_candidates(hass) -> bool:
-    """Is er iets dat op zonnepanelen lijkt? Zo nee, stap overslaan.
-
-    Kijkt naar W/kW/kWh-sensoren met een PV-achtige naam. Bewust niet op
-    `device_class: power` alleen — dat zijn in een gemiddeld huis tientallen
-    sensoren en het zegt niets over zon. De naam is hier de enige echte hint:
-    HA kent geen `device_class` die "dit is opwek" betekent.
-    """
-    for state in hass.states.async_all("sensor"):
-        unit = (state.attributes.get("unit_of_measurement") or "").lower()
-        if unit not in ("w", "kw", "kwh", "wh"):
-            continue
-        haystack = f"{state.entity_id} {state.attributes.get('friendly_name') or ''}".lower()
-        if any(hint in haystack for hint in _SOLAR_NAME_HINTS):
-            return True
-        words = haystack.replace(".", " ").replace("_", " ").replace("-", " ").split()
-        if any(hint in words for hint in _SOLAR_WORD_HINTS):
-            return True
-    return False
+# Geen kandidaat-check voor zonnepanelen: de stap wordt altijd getoond.
+#
+# Er bestaat geen `device_class` die "dit is opwek" betekent, dus de vorige
+# versie viel terug op naam-hints ("solar", "pv", "omvormer", …). Die missen
+# elke omvormer die alleen z'n merknaam voert — een Huawei publiceert
+# `sensor.huawei_sun2000_active_power` / `..._e_total`, en daar zit geen
+# enkele hint in. Zo'n vals-negatief maakt de stap ónbereikbaar: er is geen
+# knop om 'm alsnog op te roepen. Dat weegt niet op tegen de winst van een
+# scherm minder, want de stap staat standaard uit en is met één klik voorbij.
 
 
 def _solar_schema(defaults: dict | None = None) -> dict:
@@ -750,10 +729,8 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _continue_to_solar(self, data: dict[str, Any]):
-        """Zelfde overweging als bij de batterij: geen PV-achtige sensor, geen stap."""
+        """Altijd tonen — zie de toelichting bij de zonnepanelen-helpers."""
         self._p1_data = data
-        if not _has_solar_candidates(self.hass):
-            return self._finish_entry(data)
         return await self.async_step_solar()
 
     async def async_step_solar(self, user_input: dict[str, Any] | None = None):
@@ -980,15 +957,6 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
 
     async def _continue_to_solar(self, data: dict[str, Any]):
         self._p1_data = data
-        # Zelfde uitzondering als bij de batterij: wie de panelen ooit heeft
-        # ingesteld moet 'm ook kunnen uitzetten als de omvormer offline staat
-        # en de kandidaat-check dus niets vindt.
-        entry = self.config_entry
-        configured = entry.options.get(
-            CONF_SOLAR_ENABLED, entry.data.get(CONF_SOLAR_ENABLED, False)
-        )
-        if not configured and not _has_solar_candidates(self.hass):
-            return self._save_options(data)
         return await self.async_step_solar()
 
     async def async_step_solar(self, user_input: dict[str, Any] | None = None):

@@ -14,7 +14,11 @@ door `solar:fetch`. Wie een ander merk heeft — of z'n omvormer bewust niet aan
 een cloud hangt — zag `sensor.opwek_vandaag` en
 `sensor.eigen_verbruik_vandaag` leeg blijven, terwijl Home Assistant de
 omvormer allang uitleest. `own_consumption_kwh` is server-side
-`produced − delivered`, dus zonder opwek is die per definitie leeg.
+`produced − delivered` **per kwartier**, op 0 geklemd en dan pas gesommeerd,
+dus zonder opwek is die per definitie leeg. Die klem hoort per kwartier: één
+keer over de dag laat export uit een zonloos kwartier de opwek van een ander
+kwartier wegstrepen, en dan valt de sensor op 0 terwijl `opwek_vandaag`
+gewoon oploopt (SlimHuys API, sep 2026).
 
 ---
 

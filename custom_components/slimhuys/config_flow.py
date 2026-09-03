@@ -170,6 +170,22 @@ def _gas_sensors(hass) -> list[str]:
     return sorted(out)
 
 
+def _with_configured(choices: dict[str, str], *values: Any) -> dict[str, str]:
+    """Zet al ingestelde entity-ids sowieso in de keuzelijst.
+
+    De lijsten hierboven komen uit `hass.states` en filteren op unit; een
+    sensor die op dat moment `unavailable` is publiceert geen unit en valt er
+    dan uit. Zonder deze aanvulling toont de OptionsFlow zo'n veld leeg — en
+    sinds leeg óók echt leegmaken betekent (zie `_cleared`), zou wie alleen
+    even het interval kwam bijstellen zijn keuze kwijtraken.
+    """
+    out = dict(choices)
+    for value in values:
+        if isinstance(value, str) and value and value not in out:
+            out[value] = value
+    return out
+
+
 def _suggest_phase(candidates: list[str], phase: str) -> str | None:
     """Pak eerste sensor met '_l1' / '_l2' / '_l3' in de naam."""
     needle = f"_l{phase}"
@@ -203,16 +219,25 @@ def _add_optional_phase_fields(
     schema_dict: dict,
     voltage_choices: dict, current_choices: dict, power_choices: dict, gas_choices: dict,
     voltage_sensors: list, current_sensors: list, power_sensors: list, gas_sensors: list,
-    *, defaults: dict | None = None,
-) -> None:
+    *, defaults: dict | None = None, suggest: bool = True,
+) -> list[str]:
     """Voegt de optionele 3-fase-, teruglevering- en gas-dropdowns toe.
 
     Gedeeld tussen Config- en OptionsFlow. `defaults` staat toe om bestaande
     waarden uit een bewaarde entry voor te selecteren — als er geen `defaults`
     zijn (= eerste setup), suggereert de helper sensors waarvan de naam '_l1' /
     '_l2' / '_l3' / 'gas' bevat.
+
+    `suggest=False` zet die naam-suggesties uit. De OptionsFlow gebruikt dat:
+    daar betekent "geen waarde" dat de gebruiker het veld bewust leeg heeft
+    gelaten of net leeggemaakt, en een suggestie zou de keuze die 'ie zojuist
+    wiste bij de volgende ronde gewoon weer invullen.
+
+    Returnt de sleutels die daadwerkelijk in het formulier staan — de aanroeper
+    weet zo welke velden 'ie bij het opslaan mag wissen.
     """
     defaults = defaults or {}
+    added: list[str] = []
 
     def _safe_default(value, choices):
         return value if value in choices else vol.UNDEFINED
@@ -220,6 +245,8 @@ def _add_optional_phase_fields(
     def _value_for(key, candidates_by_phase, fallback_suggester=None):
         if key in defaults:
             return _safe_default(defaults[key], _choices_for(key))
+        if not suggest:
+            return vol.UNDEFINED
         # Suggest from sensor names op basis van phase-indicator.
         suggested = fallback_suggester() if fallback_suggester else None
         return suggested or vol.UNDEFINED
@@ -257,6 +284,7 @@ def _add_optional_phase_fields(
             continue
         default = _value_for(key, candidates, lambda c=candidates, p=phase: _suggest_phase(c, p))
         schema_dict[vol.Optional(key, default=default)] = vol.In({**choices, "": "—"})
+        added.append(key)
 
     if power_choices:
         default = _value_for(
@@ -266,10 +294,14 @@ def _add_optional_phase_fields(
         schema_dict[vol.Optional(CONF_P1_POWER_RETURNED, default=default)] = vol.In(
             {**power_choices, "": "—"}
         )
+        added.append(CONF_P1_POWER_RETURNED)
 
     if gas_choices:
         default = _value_for(CONF_P1_GAS, gas_sensors, lambda c=gas_sensors: _suggest_gas(c))
         schema_dict[vol.Optional(CONF_P1_GAS, default=default)] = vol.In({**gas_choices, "": "—"})
+        added.append(CONF_P1_GAS)
+
+    return added
 
 
 
@@ -507,6 +539,33 @@ def _validate_solar(user_input: dict) -> tuple[dict, dict]:
     cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
     cleaned[CONF_SOLAR_ENABLED] = True
     return cleaned, {}
+
+
+# Velden die de OptionsFlow leeg moet kunnen máken. Per stap gegroepeerd,
+# want alleen een stap die daadwerkelijk getoond is mag z'n velden wissen.
+CLEARABLE_BATTERY_FIELDS = (
+    *BATTERY_ENTITY_FIELDS, *BATTERY_TEXT_FIELDS, CONF_BATTERY_CAPACITY,
+)
+CLEARABLE_SOLAR_FIELDS = (
+    *SOLAR_ENTITY_FIELDS, *SOLAR_TEXT_FIELDS, CONF_SOLAR_CAPACITY,
+)
+
+
+def _cleared(data: dict[str, Any], keys) -> dict[str, Any]:
+    """Zet ontbrekende `keys` expliciet op `None` i.p.v. ze weg te laten.
+
+    Nodig omdat een sleutel wéglaten in de OptionsFlow niet "leeg" betekent.
+    De OptionsFlow schrijft naar `entry.options`, maar elke lezer — het
+    formulier zelf, `__init__.py`, de coordinators — leest
+    `options.get(k, data.get(k))`. Wat je in de eerste setup invulde staat in
+    `entry.data` en komt daar dus doodleuk weer bovendrijven zodra de sleutel
+    in de options ontbreekt: een verkeerd gekozen sensor was daardoor niet
+    meer weg te krijgen, hoe vaak je het veld ook leegmaakte.
+
+    Een expliciete `None` in de options wint wél van `entry.data`, en leest
+    overal als "niet ingesteld" — dezelfde uitkomst als nooit ingevuld.
+    """
+    return {**{k: None for k in keys}, **data}
 
 
 class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -776,6 +835,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         self._supplier_choice: str | None = None
         self._mode_choice: str | None = None
         self._p1_data: dict[str, Any] = {}
+        self._p1_optional_shown: list[str] = []
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Stap 1: leverancier + mode in één form."""
@@ -861,25 +921,47 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             cleaned = {k: v for k, v in user_input.items() if v != ""}
             cleaned[CONF_P1_ENABLED] = True
-            return await self._continue_to_battery(cleaned)
+            return await self._continue_to_battery(
+                _cleared(cleaned, self._p1_optional_shown)
+            )
 
         energy_sensors = _energy_sensors(self.hass)
         power_sensors = _power_sensors(self.hass)
         voltage_sensors = _voltage_sensors(self.hass)
         current_sensors = _current_sensors(self.hass)
         gas_sensors = _gas_sensors(self.hass)
-        energy_choices = {s: s for s in energy_sensors}
-        power_choices = {s: s for s in power_sensors}
-        voltage_choices = {s: s for s in voltage_sensors}
-        current_choices = {s: s for s in current_sensors}
-        gas_choices = {s: s for s in gas_sensors}
-
-        def safe_default(value, choices):
-            return value if value in choices else vol.UNDEFINED
 
         current_p1_consumption = get(CONF_P1_CONSUMPTION)
         current_p1_delivery = get(CONF_P1_DELIVERY)
         current_p1_power = get(CONF_P1_POWER)
+
+        # Al ingestelde keuzes erbij, ook als de sensor nu buiten het
+        # unit-filter valt — zie `_with_configured`.
+        energy_choices = _with_configured(
+            {s: s for s in energy_sensors}, current_p1_consumption, current_p1_delivery
+        )
+        power_choices = _with_configured(
+            {s: s for s in power_sensors},
+            current_p1_power,
+            *(get(k) for k in (
+                CONF_P1_POWER_L1, CONF_P1_POWER_L2, CONF_P1_POWER_L3,
+                CONF_P1_POWER_RETURNED_L1, CONF_P1_POWER_RETURNED_L2,
+                CONF_P1_POWER_RETURNED_L3, CONF_P1_POWER_RETURNED,
+            )),
+        )
+        voltage_choices = _with_configured(
+            {s: s for s in voltage_sensors},
+            *(get(k) for k in (CONF_P1_VOLTAGE_L1, CONF_P1_VOLTAGE_L2, CONF_P1_VOLTAGE_L3)),
+        )
+        current_choices = _with_configured(
+            {s: s for s in current_sensors},
+            *(get(k) for k in (CONF_P1_CURRENT_L1, CONF_P1_CURRENT_L2, CONF_P1_CURRENT_L3)),
+        )
+        gas_choices = _with_configured({s: s for s in gas_sensors}, get(CONF_P1_GAS))
+
+        def safe_default(value, choices):
+            return value if value in choices else vol.UNDEFINED
+
         # Clamp de prefill op het schema-bereik, anders ketst het formulier
         # af op zijn eigen ingevulde waarde bij opslaan.
         current_p1_interval = max(
@@ -906,11 +988,16 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
                     CONF_P1_POWER_RETURNED, CONF_P1_GAS,
                 ) if (v := get(k))
             }
-            _add_optional_phase_fields(
+            # Onthoud wélke optionele velden op het scherm stonden: alleen die
+            # mag `_cleared` straks leegmaken. Een veld dat er niet was (geen
+            # gas-sensor in huis bijvoorbeeld) heeft de gebruiker ook niet
+            # kunnen wissen, en hoort z'n waarde te houden.
+            self._p1_optional_shown = _add_optional_phase_fields(
                 schema_dict,
                 voltage_choices, current_choices, power_choices, gas_choices,
                 voltage_sensors, current_sensors, power_sensors, gas_sensors,
                 defaults=optional_defaults,
+                suggest=False,
             )
 
         return self.async_show_form(
@@ -936,7 +1023,10 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             battery_data, errors = _validate_battery(user_input)
             if not errors:
-                return await self._continue_to_solar({**self._p1_data, **battery_data})
+                return await self._continue_to_solar({
+                    **self._p1_data,
+                    **_cleared(battery_data, CLEARABLE_BATTERY_FIELDS),
+                })
 
         entry = self.config_entry
 
@@ -964,7 +1054,10 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             solar_data, errors = _validate_solar(user_input)
             if not errors:
-                return self._save_options({**self._p1_data, **solar_data})
+                return self._save_options({
+                    **self._p1_data,
+                    **_cleared(solar_data, CLEARABLE_SOLAR_FIELDS),
+                })
 
         entry = self.config_entry
 

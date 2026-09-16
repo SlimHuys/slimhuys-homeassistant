@@ -160,11 +160,17 @@ def _current_sensors(hass) -> list[str]:
 
 
 def _gas_sensors(hass) -> list[str]:
-    """Sensors met unit m³ of device_class=gas — DSMR-gas-aansluiting."""
+    """Sensors met unit m³ of device_class=gas — DSMR-gas-aansluiting.
+
+    Een watermeter meet óók in m³ (HomeWizard, DSMR-M-Bus). Die valt eruit op
+    device_class, anders telt SlimHuys je waterverbruik als gas.
+    """
     out = []
     for state in hass.states.async_all("sensor"):
         unit = (state.attributes.get("unit_of_measurement") or "").lower()
         device_class = (state.attributes.get("device_class") or "").lower()
+        if device_class == "water":
+            continue
         if unit in ("m³", "m3") or device_class == "gas":
             out.append(state.entity_id)
     return sorted(out)
@@ -193,9 +199,13 @@ def _suggest_phase(candidates: list[str], phase: str) -> str | None:
 
 
 def _suggest_gas(candidates: list[str]) -> str | None:
-    return next((s for s in candidates if "gas" in s.lower()), None) or (
-        candidates[0] if candidates else None
-    )
+    """Alleen een sensor met 'gas' in de naam voorstellen.
+
+    Geen terugval op de eerste m³-sensor: in een all-electric huis is dat een
+    watermeter of iets anders zonder device_class, en een vooringevuld veld
+    wordt bij de setup makkelijk doorgeklikt.
+    """
+    return next((s for s in candidates if "gas" in s.lower()), None)
 
 
 def _suggest_power_returned(candidates: list[str]) -> str | None:

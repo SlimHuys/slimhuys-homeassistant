@@ -13,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -303,6 +304,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN] and hass.services.has_service(DOMAIN, SERVICE_PUSH_READING):
             hass.services.async_remove(DOMAIN, SERVICE_PUSH_READING)
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device: DeviceEntry
+) -> bool:
+    """Laat HA een batterij-device opruimen dat SlimHuys niet meer kent.
+
+    Zonder deze hook biedt HA op een device-pagina geen verwijderknop aan.
+    Elke batterij is een eigen device (zie `_BatteryBaseSensor.device_info`),
+    en die bleef na het verwijderen van de batterij op slimhuys.nl als wees in
+    het register achter: de entities worden niet meer aangemaakt, maar device
+    én registry-rijen blijven staan tot je ze stuk voor stuk weghaalt.
+    """
+    prefix = f"{entry.entry_id}_battery_"
+    battery_ids = {
+        identifier[len(prefix):]
+        for domain, identifier in device.identifiers
+        if domain == DOMAIN and identifier.startswith(prefix)
+    }
+    if not battery_ids:
+        # Het hoofddevice (prijzen, verbruik, P1) hoort bij de entry zelf; wie
+        # daar vanaf wil verwijdert de integratie, niet het apparaat.
+        return False
+
+    state = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
+    if live is None:
+        # Geen pull-mode (meer) — het sensor-platform maakt sowieso geen
+        # batterij-entities aan, dus wat er nog staat kan alleen een wees zijn.
+        return True
+
+    # Zelfde bron als waaruit het sensor-platform de entities bouwt, zodat de
+    # regel leesbaar blijft: verwijderbaar precies wanneer er na een reload
+    # geen entities meer voor zouden komen. Weigeren zolang SlimHuys de
+    # batterij nog kent, want dan staat het device er bij de volgende reload
+    # gewoon weer — en een knop die niets blijvends doet is erger dan geen knop.
+    known = {b["id"] for b in live.batteries if b.get("id")}
+    return not (battery_ids & known)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

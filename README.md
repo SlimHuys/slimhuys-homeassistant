@@ -131,6 +131,14 @@ informatie.
 In **pull**-mode krijg je de batterij ook terúg als HA-entiteiten (laadtoestand,
 vermogen, status, inhoud, temperatuur) — elke batterij als eigen apparaat.
 
+Raak je een batterij kwijt — vervangen, of verkeerd aangemaakt — verwijder 'm
+dan eerst op slimhuys.nl en herlaad daarna de integratie. Het apparaat in Home
+Assistant kun je vervolgens gewoon via de verwijderknop op de apparaatpagina
+weghalen; zolang SlimHuys de batterij nog kent weigert HA dat, want dan zou 'ie
+bij de volgende reload toch terugkomen. Verwijder de integratie niet om dit op
+te lossen: de entity-ids hangen aan de config-entry, dus opnieuw toevoegen
+levert nieuwe ids op (`_2`) en je verliest je historie.
+
 ## Zonnepanelen (v1.11.0)
 
 SlimHuys haalde de opwek tot nu toe alleen op via een koppeling met je

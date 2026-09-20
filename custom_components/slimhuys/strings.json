@@ -206,5 +206,15 @@
         "timestamp": {"name": "Timestamp (ISO 8601, optional)"}
       }
     }
+  },
+  "issues": {
+    "ambiguous_battery": {
+      "title": "SlimHuys cannot tell your batteries apart",
+      "description": "SlimHuys knows more than one battery for this home, so it cannot tell which one these readings belong to. The battery push is paused and retried every 15 minutes.\n\nThere are two ways to fix it: fill in the serial number (external ID) in the SlimHuys options so each battery is identifiable, or remove the battery you no longer use at slimhuys.nl. The push resumes on its own once either is done — no reload needed."
+    },
+    "solar_source_conflict": {
+      "title": "Solar production already comes in through your inverter",
+      "description": "SlimHuys already collects this home's solar production through a cloud link with your inverter. Two sources for the same panels would count double, so the push from Home Assistant is refused. It is retried every 15 minutes.\n\nPick one source: disconnect the inverter at slimhuys.nl to send production from Home Assistant instead, or turn the solar push off in the SlimHuys options. The push resumes on its own once the inverter link is gone."
+    }
   }
 }

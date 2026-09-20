@@ -221,5 +221,15 @@
         }
       }
     }
+  },
+  "issues": {
+    "ambiguous_battery": {
+      "title": "SlimHuys kan je batterijen niet uit elkaar houden",
+      "description": "SlimHuys kent meer dan één batterij voor dit huis en kan daardoor niet bepalen bij welke deze metingen horen. De batterij-push ligt stil en wordt elke 15 minuten opnieuw geprobeerd.\n\nEr zijn twee manieren om het op te lossen: vul het serienummer (external ID) in bij de SlimHuys-opties, zodat elke batterij herkenbaar is, of verwijder de batterij die je niet meer gebruikt op slimhuys.nl. Zodra één van beide gedaan is loopt de push vanzelf weer — herladen is niet nodig."
+    },
+    "solar_source_conflict": {
+      "title": "De opwek komt al binnen via je omvormer",
+      "description": "SlimHuys haalt de opwek van dit huis al op via een koppeling met je omvormer. Twee bronnen voor dezelfde panelen zouden dubbel tellen, dus de push vanuit Home Assistant wordt geweigerd. Er volgt elke 15 minuten een nieuwe poging.\n\nKies één bron: koppel de omvormer los op slimhuys.nl als je de opwek voortaan vanuit Home Assistant wilt sturen, of zet de zonnepanelen-push uit bij de SlimHuys-opties. Zodra de omvormer-koppeling weg is loopt de push vanzelf weer."
+    }
   }
 }

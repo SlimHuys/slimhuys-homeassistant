@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_call_later,
@@ -88,6 +89,7 @@ from .const import (
     P1_MODE_PUSH,
     PUSH_BACKOFF_MAX_FAILURES,
     PUSH_BACKOFF_MAX_INTERVAL,
+    PUSH_BLOCKED_RETRY_INTERVAL,
     SERVICE_PUSH_READING,
 )
 from .coordinator import SlimHuysCoordinator
@@ -286,6 +288,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
     if live is not None:
         await live.async_stop()
+
+    # Meldingen horen bij een draaiende push. Bij unload weten we niet meer of
+    # het conflict nog bestaat, dus trekken we ze in; blijkt het er nog te zijn,
+    # dan zet de eerste push na de reload 'm meteen terug. Andersom zou een
+    # verwijderde integratie een melding achterlaten die niemand meer kwijtraakt.
+    # async_delete_issue op een onbekend id is een no-op.
+    for key in ("ambiguous_battery", "solar_source_conflict"):
+        ir.async_delete_issue(hass, DOMAIN, f"{key}_{entry.entry_id}")
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
@@ -531,11 +541,16 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     state = hass.data[DOMAIN][entry.entry_id]
     client: SlimHuysClient = state["client"]
-    push_state = {
-        "last_attempt": 0.0, "failures": 0, "in_flight": False, "stopped": False,
+    # Per entry gesuffixt: twee huizen in één HA-installatie zijn twee
+    # entries, en die moeten elk hun eigen repairs-melding kunnen hebben.
+    issue_id = f"ambiguous_battery_{entry.entry_id}"
+    push_state: dict[str, Any] = {
+        "last_attempt": 0.0, "failures": 0, "in_flight": False, "blocked": None,
     }
 
     def _current_interval() -> float:
+        if push_state["blocked"]:
+            return PUSH_BLOCKED_RETRY_INTERVAL
         if not push_state["failures"]:
             return float(interval)
         return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
@@ -601,7 +616,7 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     async def _do_push(_now=None) -> None:
         state["battery_pending_unsub"] = None
-        if push_state["in_flight"] or push_state["stopped"]:
+        if push_state["in_flight"]:
             return
 
         soc_pct = _read_float(soc)
@@ -634,6 +649,13 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         push_state["last_attempt"] = monotonic()
         try:
             await client.push_battery_readings([payload], battery_meta or None)
+            if push_state["blocked"]:
+                ir.async_delete_issue(hass, DOMAIN, push_state["blocked"])
+                _LOGGER.info(
+                    "SlimHuys accepteert de batterij-push weer; de melding "
+                    "is ingetrokken."
+                )
+                push_state["blocked"] = None
             if push_state["failures"]:
                 _LOGGER.debug(
                     "SlimHuys batterij-push hersteld na %d fouten", push_state["failures"]
@@ -642,15 +664,33 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         except SlimHuysApiError as err:
             # 422 ambiguous-battery is geen storing maar een configuratiefout:
             # meerdere batterijen in het huis en geen serienummer om ze uit
-            # elkaar te houden. Blijven retryen lost dat nooit op en zou elke
-            # state-change een mislukte POST kosten, dus stoppen we tot de
-            # gebruiker een external_id invult (reload = nieuwe kans).
+            # elkaar te houden. Op push-tempo blijven retryen kost elke
+            # state-change een mislukte POST, dus vallen we terug op het
+            # blocked-interval. Tot v1.11.3 stopte de push hier definitief —
+            # maar de fix (serienummer invullen, of de oude batterij
+            # verwijderen op slimhuys.nl) gebeurt buiten HA, en daarna bleef
+            # de push dood tot iemand de integratie herlaadde. Zonder signaal
+            # in de UI, want een ERROR-regel in het log ziet niemand.
             if "ambiguous-battery" in str(err):
-                push_state["stopped"] = True
-                _LOGGER.error(
-                    "SlimHuys kent meerdere batterijen voor dit huis en kan deze push "
-                    "niet toewijzen. Vul het serienummer (external_id) in bij de "
-                    "SlimHuys-opties; batterij-push is tot die tijd gestopt."
+                if not push_state["blocked"]:
+                    _LOGGER.error(
+                        "SlimHuys kent meerdere batterijen voor dit huis en kan deze "
+                        "push niet toewijzen. Vul het serienummer (external_id) in bij "
+                        "de SlimHuys-opties, of verwijder de oude batterij op "
+                        "slimhuys.nl; er volgt elke %d minuten een nieuwe poging.",
+                        int(PUSH_BLOCKED_RETRY_INTERVAL // 60),
+                    )
+                else:
+                    _LOGGER.debug("Batterij-push nog steeds geblokkeerd: %s", err)
+                push_state["blocked"] = issue_id
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="ambiguous_battery",
+                    learn_more_url="https://slimhuys.nl/app/batterij",
                 )
                 return
             push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
@@ -668,7 +708,6 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     def _on_state_change(_event) -> None:
         if (
             push_state["in_flight"]
-            or push_state["stopped"]
             or state.get("battery_pending_unsub") is not None
         ):
             return
@@ -694,7 +733,7 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         state-change-push geen dubbele POST doet, en de backoff bij API-fouten
         gerespecteerd wordt.
         """
-        if push_state["in_flight"] or push_state["stopped"]:
+        if push_state["in_flight"]:
             return
         if _elapsed() < _current_interval():
             return
@@ -756,11 +795,16 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     state = hass.data[DOMAIN][entry.entry_id]
     client: SlimHuysClient = state["client"]
-    push_state = {
-        "last_attempt": 0.0, "failures": 0, "in_flight": False, "stopped": False,
+    # Per entry gesuffixt: twee huizen in één HA-installatie zijn twee
+    # entries, en die moeten elk hun eigen repairs-melding kunnen hebben.
+    issue_id = f"solar_source_conflict_{entry.entry_id}"
+    push_state: dict[str, Any] = {
+        "last_attempt": 0.0, "failures": 0, "in_flight": False, "blocked": None,
     }
 
     def _current_interval() -> float:
+        if push_state["blocked"]:
+            return PUSH_BLOCKED_RETRY_INTERVAL
         if not push_state["failures"]:
             return float(interval)
         return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
@@ -813,7 +857,7 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     async def _do_push(_now=None) -> None:
         state["solar_pending_unsub"] = None
-        if push_state["in_flight"] or push_state["stopped"]:
+        if push_state["in_flight"]:
             return
 
         payload: dict[str, Any] = {"timestamp": _now_iso()}
@@ -830,6 +874,13 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         push_state["last_attempt"] = monotonic()
         try:
             await client.push_solar_readings([payload], station_meta or None)
+            if push_state["blocked"]:
+                ir.async_delete_issue(hass, DOMAIN, push_state["blocked"])
+                _LOGGER.info(
+                    "SlimHuys accepteert de zonnepanelen-push weer; de "
+                    "melding is ingetrokken."
+                )
+                push_state["blocked"] = None
             if push_state["failures"]:
                 _LOGGER.debug(
                     "SlimHuys zonnepanelen-push hersteld na %d fouten",
@@ -840,16 +891,31 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # 409 solar-source-conflict is geen storing maar een keuze die de
             # gebruiker moet maken: SlimHuys haalt de opwek al op bij de
             # omvormer-cloud, en twee bronnen voor dezelfde panelen tellen
-            # dubbel. Blijven retryen lost dat nooit op, dus stoppen we tot
-            # de gebruiker één van de twee uitzet (reload = nieuwe kans).
+            # dubbel. Zelfde redenering als bij ambiguous-battery hierboven:
+            # terugvallen op het blocked-interval in plaats van definitief
+            # stoppen, want de keuze wordt op slimhuys.nl gemaakt en de push
+            # hoort daarna vanzelf weer aan te slaan.
             if "solar-source-conflict" in str(err):
-                push_state["stopped"] = True
-                _LOGGER.error(
-                    "SlimHuys haalt de opwek van dit huis al op via een "
-                    "koppeling met je omvormer. Twee bronnen tellen dubbel, "
-                    "dus de zonnepanelen-push is gestopt. Koppel die los op "
-                    "slimhuys.nl als je de opwek voortaan vanuit Home "
-                    "Assistant wilt sturen, of zet deze push uit."
+                if not push_state["blocked"]:
+                    _LOGGER.error(
+                        "SlimHuys haalt de opwek van dit huis al op via een koppeling "
+                        "met je omvormer. Twee bronnen tellen dubbel, dus deze push "
+                        "wordt geweigerd. Koppel de omvormer los op slimhuys.nl als je "
+                        "de opwek voortaan vanuit Home Assistant wilt sturen, of zet "
+                        "deze push uit; er volgt elke %d minuten een nieuwe poging.",
+                        int(PUSH_BLOCKED_RETRY_INTERVAL // 60),
+                    )
+                else:
+                    _LOGGER.debug("Zonnepanelen-push nog steeds geblokkeerd: %s", err)
+                push_state["blocked"] = issue_id
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="solar_source_conflict",
+                    learn_more_url="https://slimhuys.nl/app/integraties",
                 )
                 return
             push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
@@ -867,7 +933,6 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     def _on_state_change(_event) -> None:
         if (
             push_state["in_flight"]
-            or push_state["stopped"]
             or state.get("solar_pending_unsub") is not None
         ):
             return
@@ -887,7 +952,7 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         stukgelopen koppeling kunnen onderscheiden — én het eerste kwartier na
         zonsopgang mist z'n teller-baseline.
         """
-        if push_state["in_flight"] or push_state["stopped"]:
+        if push_state["in_flight"]:
             return
         if _elapsed() < _current_interval():
             return

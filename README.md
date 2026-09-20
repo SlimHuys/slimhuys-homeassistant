@@ -109,10 +109,13 @@ je kunt elke sensor die je hebt ook echt aanwijzen.
 > **Vul het serienummer in, ook met één batterij.** Dat is wat straks een
 > tweede batterij van de eerste onderscheidt. Zonder serienummer en met
 > meerdere batterijen weigert de API de push (`422 ambiguous-battery`) in
-> plaats van te gokken — de integratie stopt dan met pushen en logt een
-> foutmelding, tot je het serienummer invult. Een push mét serienummer
-> adopteert een bestaande batterij zonder, dus je verliest geen historie als
-> je 'm later alsnog invult.
+> plaats van te gokken. Je krijgt dan een melding onder Instellingen →
+> Reparaties, en de push valt terug op één poging per 15 minuten tot het
+> conflict weg is — via het serienummer, of door de oude batterij te
+> verwijderen op slimhuys.nl. Zodra dat gebeurd is loopt de push vanzelf
+> weer; herladen hoeft niet. Een push mét serienummer adopteert een bestaande
+> batterij zonder, dus je verliest geen historie als je 'm later alsnog
+> invult.
 
 Standaard push-interval is 30 seconden, ondergrens 1. Zet 'm laag als je op
 batterijvermogen wilt schakelen; de meeste omvormers publiceren zelf trager,

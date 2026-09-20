@@ -36,8 +36,9 @@ stations-extras in de SPA meteen mee. Welke slugs een zonbron zijn staat in
 `errors/solar-source-conflict`** op een push. `pv_readings_quarter` is per
 `(household, source, station)` gesleuteld, dus dezelfde panelen via twee
 bronnen tellen netjes op tot het dubbele — en dat is achteraf niet van een
-terecht hoge opbrengst te onderscheiden. De integratie stopt op deze status
-met pushen tot de gebruiker kiest, zelfde patroon als `ambiguous-battery`.
+terecht hoge opbrengst te onderscheiden. De integratie zet op deze status een
+repairs-melding klaar en valt terug op één poging per 15 minuten tot de
+gebruiker kiest, zelfde patroon als `ambiguous-battery`.
 
 **`power_w` óf `produced_kwh_total`, minstens één per reading.** Vermogen
 heeft de voorkeur: daarmee kan de server integreren én het piekvermogen

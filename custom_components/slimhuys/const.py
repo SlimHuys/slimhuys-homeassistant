@@ -240,3 +240,12 @@ MAX_P1_INTERVAL = 300
 # minste extra requests kan hebben.
 PUSH_BACKOFF_MAX_INTERVAL = 300.0
 PUSH_BACKOFF_MAX_FAILURES = 8
+
+# Aparte, veel ruimere wachttijd voor pushes die niet op een storing maar op
+# een configuratieconflict stuiten: meerdere batterijen zonder serienummer om
+# ze uit elkaar te houden, of opwek die al via de omvormer-cloud binnenkomt.
+# Backoff-tempo is daar zinloos — de fix zit aan de SlimHuys-kant en duurt
+# minuten tot dagen. Toch blijven proberen in plaats van definitief stoppen,
+# want een gestopte push blijft anders dood tot iemand de integratie herlaadt,
+# ook lang nadat het conflict is opgelost. 15 minuten kost 4 requests per uur.
+PUSH_BLOCKED_RETRY_INTERVAL = 900.0

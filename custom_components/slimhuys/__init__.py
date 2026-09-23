@@ -414,6 +414,28 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         except (ValueError, TypeError):
             return None
 
+    def _read_energy_kwh(entity_id: str | None) -> float | None:
+        """Meterstand naar kWh — een template-sensor kan Wh of MWh leveren.
+
+        Zelfde val als bij de batterij-tellers: ongewijzigd doorsturen zet er
+        een factor 1000 naast, en de server leest deze velden als kWh.
+        """
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ("wh", "watt-hour", "watthour"):
+            value /= 1000
+        elif unit in ("mwh", "megawatt-hour"):
+            value *= 1000
+        return round(value, 3)
+
     def _read_power_w(entity_id: str | None) -> int | None:
         """Power-sensor kan W of kW zijn — detecteer via unit."""
         if not entity_id:
@@ -436,8 +458,8 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # Een DSMR-telegram werkt alle entities in dezelfde tick bij; zonder
             # deze guard start elk van die events een eigen POST.
             return
-        c_total = _read_float(consumption)
-        d_total = _read_float(delivery)
+        c_total = _read_energy_kwh(consumption)
+        d_total = _read_energy_kwh(delivery)
         p_w = _read_power_w(power)
         if c_total is None or d_total is None or p_w is None:
             return  # essential fields missen; niets doorzetten
@@ -633,6 +655,30 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             value *= 1000
         return int(round(value))
 
+    def _read_energy_kwh(entity_id: str | None) -> float | None:
+        """Cumulatieve teller naar kWh. Wh en MWh komen allebei voor.
+
+        Deye- en Growatt-integraties publiceren `total_battery_charge` vaak
+        in Wh. Die ongewijzigd als kWh doorsturen blaast het laden met een
+        factor 1000 op, en omdat de server primair de teller-delta gebruikt
+        staat er dan 11 kWh in een kwartier waarin de batterij op 50 W stond.
+        """
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ("wh", "watt-hour", "watthour"):
+            value /= 1000
+        elif unit in ("mwh", "megawatt-hour"):
+            value *= 1000
+        return round(value, 3)
+
     def _signed_power_w() -> int | None:
         """API-conventie: positief = laden.
 
@@ -671,11 +717,13 @@ def _maybe_start_battery_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         for key, eid in (
             ("charged_kwh_total", charged_total),
             ("discharged_kwh_total", discharged_total),
-            ("temp_c", temp),
         ):
-            value = _read_float(eid)
+            value = _read_energy_kwh(eid)
             if value is not None:
                 payload[key] = value
+        temp_c = _read_float(temp)
+        if temp_c is not None:
+            payload["temp_c"] = temp_c
         pv = _read_power_w(pv_power)
         if pv is not None:
             payload["pv_power_w"] = pv

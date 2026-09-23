@@ -167,8 +167,17 @@ Zelfde vorm als `ReadingsController`:
   (TZ-suffix verplicht; voorkomt dat een verkeerd geconfigureerde client
   TZ-loze strings in server-tz laat parsen)
 - `readings.*.soc_pct` — `required|numeric|min:0|max:100`
-- `readings.*.power_w` — `required|numeric` (**geen** `min:0`, signed)
-- `readings.*.charged_kwh_total` / `discharged_kwh_total` — `nullable|numeric|min:0`
+- `readings.*.power_w` — `required|numeric` (**geen** `min:0`, signed). Readings
+  met `|power_w| > 100.000` worden **overgeslagen** i.p.v. de batch te
+  weigeren: thuisbatterijen zitten daar ruim onder, dus zulke waarden zijn
+  register-glitches (waargenomen: −65.482 en −385.941.502 W, de 16- en
+  32-bits wrap).
+- `readings.*.charged_kwh_total` / `discharged_kwh_total` — `nullable|numeric|min:0`.
+  **In kWh, niet in Wh.** Veel omvormer-integraties publiceren deze tellers in
+  Wh; de client moet op `unit_of_measurement` omrekenen. De server rekent
+  primair met de teller-delta en kruist die tegen de vermogens-integratie —
+  claimt de teller meer dan 5× wat de watts verklaren, dan vallen we terug op
+  het vermogen (en anders begrenst de capaciteit van de batterij het kwartier).
 - `readings.*.energy_kwh` — `nullable|numeric|min:0`
 - `readings.*.mode` — `nullable|string|max:24`
 - `readings.*.temp_c` — `nullable|numeric|min:-50|max:100`

@@ -95,9 +95,10 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
 
             today_start = nl_now().replace(hour=0, minute=0, second=0, microsecond=0)
             tomorrow_end = today_start + timedelta(days=2)
-            # Vanaf gisteren, net als slimhuys.nl: de API rekent `level` per
-            # slot t.o.v. het gemiddelde van het gevraagde venster. Met
-            # hetzelfde venster krijgt HA exact dezelfde kleuren als de site.
+            # Vanaf gisteren, net als slimhuys.nl. Sinds de API `level` t.o.v.
+            # de 30-dagenmediaan rekent maakt het venster voor `level` niet
+            # meer uit, maar `level_relative` (en `level` op een oudere API)
+            # rekent nog t.o.v. het venster — zo blijven die gelijk aan de site.
             yesterday_start = today_start - timedelta(days=1)
             from_iso = yesterday_start.strftime("%Y-%m-%dT%H:%M:%S")
             to_iso = tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S")
@@ -111,9 +112,18 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
         resolution = self._resolution(range_resp, points)
         slots = self._build_consume_slots(points, resolution)
 
+        days = {
+            d["date"]: d
+            for d in (range_resp or {}).get("days") or []
+            if isinstance(d, dict) and d.get("date")
+        }
+
         data = {
             "current": current,
             "slots": slots,
+            # Oudere API zonder 30-dagenreferentie → None / {}.
+            "reference": (range_resp or {}).get("reference"),
+            "days": days,
             "resolution_minutes": resolution,
             "cheapest_block": self._find_cheapest_block(slots, CHEAPEST_BLOCK_HOURS),
             "next_negative": self._find_next_negative(slots),
@@ -239,6 +249,7 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
                     "price": price,
                     "epex": get_epex(p),
                     "level": p.get("level"),
+                    "level_relative": p.get("level_relative"),
                     "start": start.astimezone(timezone.utc),
                     "end": end.astimezone(timezone.utc),
                     "end_local": end_local,

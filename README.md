@@ -7,7 +7,7 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 
 ## Wat krijg je?
 
-**Vijftien prijssensoren per leverancier:**
+**Zeventien prijssensoren per leverancier:**
 
 | Sensor | Eenheid | Voorbeeld |
 |---|---|---|
@@ -20,6 +20,8 @@ stroomtarieven (EPEX day-ahead, NL) + push-bridge voor je P1/DSMR-meter.
 | `sensor.goedkoopste_blok_gemiddelde` | EUR/kWh | `0.094` |
 | `sensor.volgende_negatieve_prijs` | string | `"2026-04-30 13:45"` |
 | `sensor.tariefniveau_nu` | enum | `very_low / low / medium / high / peak` |
+| `sensor.dagniveau_vandaag` | enum | `high` — hele dag t.o.v. de afgelopen 30 dagen |
+| `sensor.dagniveau_morgen` | enum | `low` of `unknown` |
 | `sensor.prijzen_vandaag` | EUR/kWh + `prices[96\|24]` attr | `0.158` |
 | `sensor.prijzen_morgen` | EUR/kWh + `prices[96\|24]` attr | `0.187` of `unknown` |
 | `sensor.prijzen_vandaag_kwartier` | alias van `prijzen_vandaag` | `0.155` |
@@ -189,6 +191,7 @@ pollen elke vijf minuten.
 attributes:
   prices: [0.18, 0.17, …]          # all-in EUR/kWh, 96 bij kwartier / 24 bij uur
   levels: [medium, low, …]         # SlimHuys-niveau per slot, zie hieronder
+  levels_relative: [low, …]        # niveau t.o.v. gisteren t/m morgen
   granularity_minutes: 15          # resolutie van je leverancier
   raw_today:                       # voor ApexCharts e.d.
     - start: "2026-05-16T00:00:00+02:00"
@@ -199,6 +202,13 @@ attributes:
   average: 0.21
   min: 0.09
   max: 0.46
+  day_level: high                  # hele dag t.o.v. de afgelopen 30 dagen
+  reference_median_eur_per_kwh: 0.23
+  thresholds:                      # bovengrens per niveau in EUR/kWh
+    very_low: 0.115
+    low: 0.184
+    medium: 0.276
+    high: 0.345                    # daarboven: peak
 ```
 
 > **Niet in de historie.** De dag-arrays (`prices`, `raw_today`,
@@ -209,12 +219,23 @@ attributes:
 > gewoon van de live state; alleen `history`/`recorder` kent ze niet meer.
 
 **`level` is dezelfde indeling als de kleuren op slimhuys.nl** (`very_low`,
-`low`, `medium`, `high`, `peak`). SlimHuys zet elk slot af tegen het gemiddelde
-van gisteren t/m morgen: ≤ 50 % is `very_low`, ≤ 80 % `low`, ≤ 120 % `medium`,
-≤ 150 % `high` en daarboven `peak`. Kaarten die zelf "goedkoop/duur" uitrekenen
-op de spreiding van één dag kleuren een vlakke dag half groen, ook als geen
-enkel kwartier echt goedkoop is. Met `level` krijg je dezelfde kleuren als op de site;
-zie [Kleuren zoals op slimhuys.nl](#kleuren-zoals-op-slimhuysnl).
+`low`, `medium`, `high`, `peak`). SlimHuys zet elk slot af tegen de mediaan van
+de all-in prijs over de **30 dagen vóór die dag**: ≤ 50 % is `very_low`,
+≤ 80 % `low`, ≤ 120 % `medium`, ≤ 150 % `high` en daarboven `peak`. Een dure
+week blijft daardoor duur, in plaats van na een paar dagen weer "gemiddeld" te
+heten. De mediaan (geen gemiddelde) zorgt dat negatieve zomermiddagen de lat
+niet omlaag trekken. Kaarten die zelf "goedkoop/duur" uitrekenen op de
+spreiding van één dag kleuren een vlakke, dure dag half groen; met `level` krijg
+je dezelfde kleuren als op de site — zie
+[Kleuren zoals op slimhuys.nl](#kleuren-zoals-op-slimhuysnl).
+
+**`levels_relative`** is het niveau t.o.v. het gemiddelde van gisteren t/m
+morgen. Op een dure dag is alles `high`/`peak`, maar `levels_relative` laat nog
+steeds zien welk kwartier het minst slecht is — handig voor automatiseringen
+die hoe dan ook vandaag moeten draaien. `thresholds` zijn de grenzen in euro's,
+zodat je ook waarden zonder eigen `level` (zoals `goedkoopste_blok_gemiddelde`)
+in dezelfde kleur kunt zetten. Staat er (nog) te weinig historie in de API, dan
+ontbreken `thresholds`/`day_level` en is `level` gelijk aan `levels_relative`.
 
 **Prijzen volgen de resolutie van je leverancier.** Rekent die per kwartier af
 (Zonneplan, Tibber, Frank, easyEnergy, Coolblue …), dan krijg je 96 waarden per
@@ -423,7 +444,8 @@ cards:
       € {{ states('sensor.goedkoopste_blok_gemiddelde') | float(0) | round(3) }}/kWh
 
 
-      **Niveau nu:** {{ states('sensor.tariefniveau_nu') }}
+      **Niveau nu:** {{ states('sensor.tariefniveau_nu') }} ·
+      **vandaag:** {{ states('sensor.dagniveau_vandaag') }}
       {% if states('sensor.volgende_negatieve_prijs') not in ['geen', 'unknown'] %}
 
 

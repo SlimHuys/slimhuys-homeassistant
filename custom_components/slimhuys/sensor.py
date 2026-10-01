@@ -108,6 +108,8 @@ async def async_setup_entry(
         CheapestBlockAverageSensor(coordinator, entry, supplier),
         NextNegativeSensor(coordinator, entry, supplier),
         CurrentLevelSensor(coordinator, entry, supplier),
+        DayLevelSensor(coordinator, entry, supplier, tomorrow=False),
+        DayLevelSensor(coordinator, entry, supplier, tomorrow=True),
         PricesTodaySensor(coordinator, entry, supplier),
         PricesTomorrowSensor(coordinator, entry, supplier),
         PricesTodayQuarterSensor(coordinator, entry, supplier),
@@ -264,6 +266,8 @@ class CurrentPriceSensor(_BaseSensor):
             "valid_from": cur["now"]["timestamp"],
             "valid_until": cur["now"]["valid_until"],
             "level": cur["now"]["level"],
+            "level_relative": cur["now"].get("level_relative"),
+            **_reference_attrs(cur.get("reference")),
             "supplier": self._supplier,
         }
 
@@ -418,6 +422,72 @@ class CurrentLevelSensor(_BaseSensor):
         cur = (self.coordinator.data or {}).get("current")
         return cur["now"]["level"] if cur else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        cur = (self.coordinator.data or {}).get("current")
+        if not cur:
+            return None
+        return {
+            "level_relative": cur["now"].get("level_relative"),
+            **_reference_attrs(cur.get("reference")),
+        }
+
+
+class DayLevelSensor(_BaseSensor):
+    """Niveau van de hele dag t.o.v. de 30-dagenmediaan — "is vandaag duur?".
+
+    `None` op een API zonder referentie (te weinig historie of oude versie)
+    en voor morgen vóór de EPEX-publicatie.
+    """
+
+    _attr_icon = "mdi:calendar-today"
+
+    def __init__(self, coordinator, entry, supplier, tomorrow: bool):
+        super().__init__(
+            coordinator,
+            entry,
+            supplier,
+            "day_level_tomorrow" if tomorrow else "day_level_today",
+            "Dagniveau morgen" if tomorrow else "Dagniveau vandaag",
+        )
+        self._tomorrow = tomorrow
+        if tomorrow:
+            self._attr_icon = "mdi:calendar-arrow-right"
+
+    def _day(self) -> dict[str, Any]:
+        day = _tomorrow_str() if self._tomorrow else _today_str()
+        return ((self.coordinator.data or {}).get("days") or {}).get(day) or {}
+
+    @property
+    def native_value(self) -> str | None:
+        return self._day().get("level")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        info = self._day()
+        if not info:
+            return None
+        return {
+            "average_eur_per_kwh": info.get("average_eur_per_kwh"),
+            **_reference_attrs(info.get("reference")),
+        }
+
+
+def _reference_attrs(reference: dict[str, Any] | None) -> dict[str, Any]:
+    """30-dagenreferentie van de API als platte attributen.
+
+    `thresholds` zijn bovengrenzen in €/kWh per niveau (boven `high` is het
+    `peak`) — daarmee kleurt een kaart of template ook waarden zonder eigen
+    `level`, zoals het goedkoopste blok.
+    """
+    if not reference:
+        return {}
+    return {
+        "reference_median_eur_per_kwh": reference.get("median_eur_per_kwh"),
+        "reference_window_days": reference.get("window_days"),
+        "thresholds": reference.get("thresholds"),
+    }
+
 
 # ---------- Today/tomorrow price arrays (dashboard-friendly) ----------
 
@@ -456,20 +526,25 @@ def _day_attrs(
     resolution: int,
     raw_key: str,
     supplier: str,
+    day_info: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Gedeelde attributen voor de dag-arrays (consume én feedin).
 
     `prices` volgt de resolutie van de leverancier: 96 waarden bij kwartier,
     24 bij uur. `granularity_minutes` zegt welke, zodat een dashboard niet
     hoeft te raden aan de lengte van de array.
+
+    `day_info` (alleen consume) voegt het dagniveau en de 30-dagenreferentie
+    toe; teruglevering heeft die niet.
     """
     day_slots = slots_for_day(slots, day)
     prices = [s["price"] for s in day_slots]
     if not prices:
         return None
-    return {
+    attrs = {
         "prices": prices,
         "levels": [s.get("level") for s in day_slots],
+        "levels_relative": [s.get("level_relative") for s in day_slots],
         raw_key: _build_raw(day_slots),
         f"{raw_key}_epex": _build_raw(day_slots, field="epex"),
         "granularity_minutes": resolution,
@@ -478,6 +553,10 @@ def _day_attrs(
         "max": max(prices),
         "supplier": supplier,
     }
+    if day_info is not None:
+        attrs["day_level"] = day_info.get("level")
+        attrs.update(_reference_attrs(day_info.get("reference")))
+    return attrs
 
 
 class PricesTodaySensor(_BaseSensor):
@@ -494,7 +573,7 @@ class PricesTodaySensor(_BaseSensor):
     # "unit (None) cannot be converted to €/kWh". Frontend/templates zien de
     # attributen gewoon; alleen de historie slaat ze niet op.
     _unrecorded_attributes = frozenset(
-        {"prices", "levels", "raw_today", "raw_today_epex"}
+        {"prices", "levels", "levels_relative", "raw_today", "raw_today_epex"}
     )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -520,6 +599,7 @@ class PricesTodaySensor(_BaseSensor):
             data.get("resolution_minutes", 60),
             "raw_today",
             self._supplier,
+            (data.get("days") or {}).get(_today_str(), {}),
         )
 
 
@@ -527,7 +607,7 @@ class PricesTomorrowSensor(_BaseSensor):
     """Prijzen morgen — state = daggemiddelde, None vóór EPEX-publicatie (~14:00)."""
 
     _unrecorded_attributes = frozenset(
-        {"prices", "levels", "raw_tomorrow", "raw_tomorrow_epex"}
+        {"prices", "levels", "levels_relative", "raw_tomorrow", "raw_tomorrow_epex"}
     )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -556,9 +636,11 @@ class PricesTomorrowSensor(_BaseSensor):
             data.get("resolution_minutes", 60),
             "raw_tomorrow",
             self._supplier,
+            (data.get("days") or {}).get(tomorrow, {}),
         ) or {
             "prices": [],
             "levels": [],
+            "levels_relative": [],
             "raw_tomorrow": [],
             "raw_tomorrow_epex": [],
             "granularity_minutes": data.get("resolution_minutes", 60),
@@ -660,7 +742,7 @@ class FeedinTodaySensor(_BaseSensor):
     """Teruglevering vandaag — state = huidige rate, attrs = array + raw_today."""
 
     _unrecorded_attributes = frozenset(
-        {"prices", "levels", "raw_today", "raw_today_epex"}
+        {"prices", "levels", "levels_relative", "raw_today", "raw_today_epex"}
     )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -697,7 +779,7 @@ class FeedinTomorrowSensor(_BaseSensor):
     """Teruglevering morgen — state = daggemiddelde, None vóór EPEX-publicatie."""
 
     _unrecorded_attributes = frozenset(
-        {"prices", "levels", "raw_tomorrow", "raw_tomorrow_epex"}
+        {"prices", "levels", "levels_relative", "raw_tomorrow", "raw_tomorrow_epex"}
     )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -733,6 +815,7 @@ class FeedinTomorrowSensor(_BaseSensor):
         ) or {
             "prices": [],
             "levels": [],
+            "levels_relative": [],
             "raw_tomorrow": [],
             "raw_tomorrow_epex": [],
             "granularity_minutes": resolution,

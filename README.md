@@ -188,11 +188,13 @@ pollen elke vijf minuten.
 ```yaml
 attributes:
   prices: [0.18, 0.17, …]          # all-in EUR/kWh, 96 bij kwartier / 24 bij uur
+  levels: [medium, low, …]         # SlimHuys-niveau per slot, zie hieronder
   granularity_minutes: 15          # resolutie van je leverancier
   raw_today:                       # voor ApexCharts e.d.
     - start: "2026-05-16T00:00:00+02:00"
       end:   "2026-05-16T00:15:00+02:00"
       value: 0.18
+      level: medium
   raw_today_epex: [...]            # kale EPEX (zonder marge/btw/EB)
   average: 0.21
   min: 0.09
@@ -205,6 +207,14 @@ attributes:
 > de 16 kB-limiet van HA, waardoor de recorder álle attributen liet vallen en
 > de long-term statistics stukliepen. Kaarten en templates lezen de attributen
 > gewoon van de live state; alleen `history`/`recorder` kent ze niet meer.
+
+**`level` is dezelfde indeling als de kleuren op slimhuys.nl** (`very_low`,
+`low`, `medium`, `high`, `peak`). SlimHuys zet elk slot af tegen het gemiddelde
+van gisteren t/m morgen: ≤ 50 % is `very_low`, ≤ 80 % `low`, ≤ 120 % `medium`,
+≤ 150 % `high` en daarboven `peak`. Kaarten die zelf "goedkoop/duur" uitrekenen
+op de spreiding van één dag kleuren een vlakke dag half groen, ook als geen
+enkel kwartier echt goedkoop is. Met `level` krijg je dezelfde kleuren als op de site;
+zie [Kleuren zoals op slimhuys.nl](#kleuren-zoals-op-slimhuysnl).
 
 **Prijzen volgen de resolutie van je leverancier.** Rekent die per kwartier af
 (Zonneplan, Tibber, Frank, easyEnergy, Coolblue …), dan krijg je 96 waarden per
@@ -504,6 +514,70 @@ in — zet `graph_span: 1d` als je die dag-in-detail wilt zien.
 **Teruglevering erbij?** Voeg een derde reeks toe met
 `entity: sensor.teruglevering_vandaag` — die heeft exact dezelfde
 `raw_today`-structuur.
+
+### Kleuren zoals op slimhuys.nl
+
+De `color_threshold` hierboven werkt met vaste bedragen. Wil je dezelfde
+kleuren als op slimhuys.nl, kleur dan op `level`: één gestapelde reeks per
+niveau, waarvan per kwartier precies één een waarde heeft.
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Stroomprijs vandaag
+graph_span: 1d
+span:
+  start: day
+now:
+  show: true
+  label: nu
+apex_config:
+  chart:
+    stacked: true
+  legend:
+    show: false
+yaxis:
+  - decimals: 2
+series:
+  - entity: sensor.prijzen_vandaag
+    name: Zeer laag
+    type: column
+    color: "#9FE1CB"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p =>
+        [new Date(p.start).getTime(), p.level === "very_low" ? p.value : null]);
+  - entity: sensor.prijzen_vandaag
+    name: Laag
+    type: column
+    color: "#5DCAA5"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p =>
+        [new Date(p.start).getTime(), p.level === "low" ? p.value : null]);
+  - entity: sensor.prijzen_vandaag
+    name: Gemiddeld
+    type: column
+    color: "#FAC775"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p =>
+        [new Date(p.start).getTime(), p.level === "medium" ? p.value : null]);
+  - entity: sensor.prijzen_vandaag
+    name: Hoog
+    type: column
+    color: "#EF9F27"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p =>
+        [new Date(p.start).getTime(), p.level === "high" ? p.value : null]);
+  - entity: sensor.prijzen_vandaag
+    name: Piek
+    type: column
+    color: "#D85A30"
+    data_generator: |
+      return (entity.attributes.raw_today || []).map(p =>
+        [new Date(p.start).getTime(), p.level === "peak" ? p.value : null]);
+```
+
+Voor morgen: zelfde kaart met `sensor.prijzen_morgen` en `raw_tomorrow`.
 
 ### Kale EPEX naast de all-in prijs
 

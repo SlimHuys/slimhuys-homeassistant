@@ -12,6 +12,7 @@ Twee varianten, met bewust verschillende doelen:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -68,7 +69,10 @@ def _next_negative_start(
 ) -> str | None:
     """Start-ts van de eerstvolgende negatieve periode (vanaf nu)."""
     idx = slot_index_now(slots)
+    now = datetime.now(timezone.utc)
     for s in slots[idx if idx is not None else 0 :]:
+        if s["end"] <= now:
+            continue  # slots bevatten ook gisteren
         price = s.get(key)
         if price is not None and price < threshold:
             return s.get("start_ts")

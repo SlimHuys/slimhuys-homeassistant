@@ -95,7 +95,11 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
 
             today_start = nl_now().replace(hour=0, minute=0, second=0, microsecond=0)
             tomorrow_end = today_start + timedelta(days=2)
-            from_iso = today_start.strftime("%Y-%m-%dT%H:%M:%S")
+            # Vanaf gisteren, net als slimhuys.nl: de API rekent `level` per
+            # slot t.o.v. het gemiddelde van het gevraagde venster. Met
+            # hetzelfde venster krijgt HA exact dezelfde kleuren als de site.
+            yesterday_start = today_start - timedelta(days=1)
+            from_iso = yesterday_start.strftime("%Y-%m-%dT%H:%M:%S")
             to_iso = tomorrow_end.strftime("%Y-%m-%dT%H:%M:%S")
             range_resp = await self._client.price_range(
                 self._supplier, from_iso, to_iso
@@ -234,6 +238,7 @@ class SlimHuysCoordinator(DataUpdateCoordinator):
                     "minute": start_local.minute,
                     "price": price,
                     "epex": get_epex(p),
+                    "level": p.get("level"),
                     "start": start.astimezone(timezone.utc),
                     "end": end.astimezone(timezone.utc),
                     "end_local": end_local,

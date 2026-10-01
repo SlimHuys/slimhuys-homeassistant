@@ -433,9 +433,18 @@ def _tomorrow_str() -> str:
 def _build_raw(
     slots: list[dict[str, Any]], field: str = "price"
 ) -> list[dict[str, Any]]:
-    """ApexCharts-vorm: `{start, end, value}` per slot, op eigen resolutie."""
+    """ApexCharts-vorm: `{start, end, value, level}` per slot, op eigen resolutie.
+
+    `level` is het SlimHuys-niveau (very_low … peak) — dezelfde indeling als
+    de kleuren op slimhuys.nl.
+    """
     return [
-        {"start": s["start_ts"], "end": s["end_ts"], "value": s[field]}
+        {
+            "start": s["start_ts"],
+            "end": s["end_ts"],
+            "value": s[field],
+            "level": s.get("level"),
+        }
         for s in slots
         if s.get(field) is not None
     ]
@@ -460,6 +469,7 @@ def _day_attrs(
         return None
     return {
         "prices": prices,
+        "levels": [s.get("level") for s in day_slots],
         raw_key: _build_raw(day_slots),
         f"{raw_key}_epex": _build_raw(day_slots, field="epex"),
         "granularity_minutes": resolution,
@@ -483,7 +493,9 @@ class PricesTodaySensor(_BaseSensor):
     # unit_of_measurement, waardoor long-term statistics stukliepen op
     # "unit (None) cannot be converted to €/kWh". Frontend/templates zien de
     # attributen gewoon; alleen de historie slaat ze niet op.
-    _unrecorded_attributes = frozenset({"prices", "raw_today", "raw_today_epex"})
+    _unrecorded_attributes = frozenset(
+        {"prices", "levels", "raw_today", "raw_today_epex"}
+    )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4
@@ -514,7 +526,9 @@ class PricesTodaySensor(_BaseSensor):
 class PricesTomorrowSensor(_BaseSensor):
     """Prijzen morgen — state = daggemiddelde, None vóór EPEX-publicatie (~14:00)."""
 
-    _unrecorded_attributes = frozenset({"prices", "raw_tomorrow", "raw_tomorrow_epex"})
+    _unrecorded_attributes = frozenset(
+        {"prices", "levels", "raw_tomorrow", "raw_tomorrow_epex"}
+    )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4
@@ -544,6 +558,7 @@ class PricesTomorrowSensor(_BaseSensor):
             self._supplier,
         ) or {
             "prices": [],
+            "levels": [],
             "raw_tomorrow": [],
             "raw_tomorrow_epex": [],
             "granularity_minutes": data.get("resolution_minutes", 60),
@@ -644,7 +659,9 @@ class FeedinCurrentSensor(_BaseSensor):
 class FeedinTodaySensor(_BaseSensor):
     """Teruglevering vandaag — state = huidige rate, attrs = array + raw_today."""
 
-    _unrecorded_attributes = frozenset({"prices", "raw_today", "raw_today_epex"})
+    _unrecorded_attributes = frozenset(
+        {"prices", "levels", "raw_today", "raw_today_epex"}
+    )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4
@@ -679,7 +696,9 @@ class FeedinTodaySensor(_BaseSensor):
 class FeedinTomorrowSensor(_BaseSensor):
     """Teruglevering morgen — state = daggemiddelde, None vóór EPEX-publicatie."""
 
-    _unrecorded_attributes = frozenset({"prices", "raw_tomorrow", "raw_tomorrow_epex"})
+    _unrecorded_attributes = frozenset(
+        {"prices", "levels", "raw_tomorrow", "raw_tomorrow_epex"}
+    )
     _attr_native_unit_of_measurement = UNIT_EUR_PER_KWH
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 4
@@ -713,6 +732,7 @@ class FeedinTomorrowSensor(_BaseSensor):
             self._supplier,
         ) or {
             "prices": [],
+            "levels": [],
             "raw_tomorrow": [],
             "raw_tomorrow_epex": [],
             "granularity_minutes": resolution,

@@ -204,6 +204,16 @@ DEFAULT_SOLAR_INTERVAL = 30
 MIN_SOLAR_INTERVAL = 1
 MAX_SOLAR_INTERVAL = 300
 
+# Een vermogen dat de bron zo lang niet meer heeft geschreven, is bevroren:
+# de omvormer-integratie is blijven hangen zonder op `unavailable` te gaan.
+# Ruim boven het trage eind van cloud-integraties (SolarEdge en Enphase
+# pollen per 15 min), zodat die niet onterecht wegvallen.
+SOLAR_POWER_STALE_SECONDS = 1800
+
+# Eenheden waaraan een energie-sensor te herkennen is. Een vermogens-veld met
+# zo'n eenheid is een verkeerd gekozen sensor, geen vermogen.
+ENERGY_UNITS = ("wh", "kwh", "mwh", "watt-hour", "watthour", "kilowatt-hour", "megawatt-hour")
+
 # Service names
 SERVICE_PUSH_READING = "push_reading"
 

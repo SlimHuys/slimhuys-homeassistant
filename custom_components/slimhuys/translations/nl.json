@@ -96,6 +96,8 @@
       "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
       "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
       "solar_source_required": "Kies een opwek-sensor (vermogen of kWh-teller), of zet de zonnepanelen-push uit.",
+      "solar_power_is_energy": "Deze sensor is een energie-teller (Wh/kWh), geen vermogen. Kies een sensor in W of kW; de teller hoort in het kWh-veld hieronder.",
+      "solar_total_is_power": "Deze sensor is een vermogen (W/kW), geen kWh-teller. Kies een sensor in kWh of Wh.",
       "invalid_auth": "API-key is ongeldig of ingetrokken.",
       "cannot_connect": "Kan SlimHuys niet bereiken — controleer de basis-URL en je internet."
     },
@@ -178,6 +180,13 @@
           "solar_capacity_kwp": "Vermogen van de installatie (kWp)"
         }
       }
+    },
+    "error": {
+      "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
+      "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
+      "solar_source_required": "Kies een opwek-sensor (vermogen of kWh-teller), of zet de zonnepanelen-push uit.",
+      "solar_power_is_energy": "Deze sensor is een energie-teller (Wh/kWh), geen vermogen. Kies een sensor in W of kW; de teller hoort in het kWh-veld hieronder.",
+      "solar_total_is_power": "Deze sensor is een vermogen (W/kW), geen kWh-teller. Kies een sensor in kWh of Wh."
     }
   },
   "services": {

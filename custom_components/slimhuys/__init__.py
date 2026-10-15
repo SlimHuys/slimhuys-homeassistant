@@ -19,6 +19,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.util import dt as dt_util
 
 from .api import SlimHuysApiError, SlimHuysClient
 from .const import (
@@ -79,6 +80,7 @@ from .const import (
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
     DEFAULT_SOLAR_INTERVAL,
+    ENERGY_UNITS,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_P1_INTERVAL,
@@ -92,6 +94,7 @@ from .const import (
     PUSH_BACKOFF_MAX_INTERVAL,
     PUSH_BLOCKED_RETRY_INTERVAL,
     SERVICE_PUSH_READING,
+    SOLAR_POWER_STALE_SECONDS,
 )
 from .coordinator import SlimHuysCoordinator
 from .live_coordinator import SlimHuysLiveCoordinator
@@ -887,6 +890,7 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     issue_id = f"solar_source_conflict_{entry.entry_id}"
     push_state: dict[str, Any] = {
         "last_attempt": 0.0, "failures": 0, "in_flight": False, "blocked": None,
+        "warned_energy_unit": False, "warned_stale": False,
     }
 
     def _current_interval() -> float:
@@ -913,6 +917,34 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         except (ValueError, TypeError):
             return None
         unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        if unit in ENERGY_UNITS:
+            # Een opwek-teller in het vermogens-veld: een dagopbrengst van
+            # 16386 Wh kwam als 16 kW binnen en bleef 's avonds staan.
+            if not push_state["warned_energy_unit"]:
+                _LOGGER.warning(
+                    "%s is een energie-sensor (%s), geen vermogen; die wordt "
+                    "niet als opwek-vermogen doorgestuurd. Kies in de "
+                    "SlimHuys-opties een sensor in W of kW.",
+                    entity_id, s.attributes.get("unit_of_measurement"),
+                )
+                push_state["warned_energy_unit"] = True
+            return None
+        if value and (dt_util.utcnow() - s.last_reported).total_seconds() > SOLAR_POWER_STALE_SECONDS:
+            # Bevroren: de bron schrijft niet meer, maar de state staat nog op
+            # een waarde. Een hangende omvormer-integratie gaf zo uren 1623 W
+            # opwek door met een stilstaande teller. Een stilstaande 0 is wél
+            # geloofwaardig — integraties die alleen bij een wijziging
+            # schrijven laten die 's nachts gewoon staan.
+            if not push_state["warned_stale"]:
+                _LOGGER.warning(
+                    "%s is al %d minuten niet bijgewerkt maar staat nog op %s; "
+                    "die waarde wordt niet meer als opwek doorgestuurd tot de "
+                    "sensor weer bijwerkt.",
+                    entity_id, SOLAR_POWER_STALE_SECONDS // 60, s.state,
+                )
+                push_state["warned_stale"] = True
+            return None
+        push_state["warned_stale"] = False
         if unit in ("kw", "kilowatt"):
             value *= 1000
         elif unit in ("mw", "megawatt"):

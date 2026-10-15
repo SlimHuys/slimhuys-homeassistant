@@ -96,6 +96,8 @@
       "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
       "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
       "solar_source_required": "Pick a production sensor (power or kWh counter), or turn the solar push off.",
+      "solar_power_is_energy": "The selected sensor is an energy counter (Wh/kWh), not power. Pick a sensor in W or kW; put the counter in the kWh field below.",
+      "solar_total_is_power": "The selected sensor is power (W/kW), not a kWh counter. Pick a sensor in kWh or Wh.",
       "invalid_auth": "API key is invalid or revoked.",
       "cannot_connect": "Cannot reach SlimHuys — check the base URL and your internet."
     },
@@ -178,6 +180,13 @@
           "solar_capacity_kwp": "Installed capacity (kWp)"
         }
       }
+    },
+    "error": {
+      "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
+      "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
+      "solar_source_required": "Pick a production sensor (power or kWh counter), or turn the solar push off.",
+      "solar_power_is_energy": "The selected sensor is an energy counter (Wh/kWh), not power. Pick a sensor in W or kW; put the counter in the kWh field below.",
+      "solar_total_is_power": "The selected sensor is power (W/kW), not a kWh counter. Pick a sensor in kWh or Wh."
     }
   },
   "services": {

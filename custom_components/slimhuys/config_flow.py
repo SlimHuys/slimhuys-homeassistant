@@ -73,6 +73,7 @@ from .const import (
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
     DEFAULT_SOLAR_INTERVAL,
+    ENERGY_UNITS,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_BATTERY_INTERVAL,
@@ -551,6 +552,28 @@ def _validate_solar(user_input: dict) -> tuple[dict, dict]:
     return cleaned, {}
 
 
+def _solar_unit_errors(hass, data: dict) -> dict[str, str]:
+    """Vermogen en teller omgewisseld of dubbel gekozen.
+
+    De selector filtert bewust niet op device_class (zie hierboven), dus een
+    dagopbrengst-sensor past net zo goed in het vermogens-veld. Op de eenheid
+    is het verschil wél te zien.
+    """
+    if not data.get(CONF_SOLAR_ENABLED):
+        return {}
+
+    def _unit(key) -> str | None:
+        state = hass.states.get(data[key]) if data.get(key) else None
+        return (state.attributes.get("unit_of_measurement") or "").lower() if state else None
+
+    errors: dict[str, str] = {}
+    if _unit(CONF_SOLAR_POWER) in ENERGY_UNITS:
+        errors[CONF_SOLAR_POWER] = "solar_power_is_energy"
+    if _unit(CONF_SOLAR_TOTAL) in ("w", "kw", "mw", "watt", "kilowatt", "megawatt"):
+        errors[CONF_SOLAR_TOTAL] = "solar_total_is_power"
+    return errors
+
+
 # Velden die de OptionsFlow leeg moet kunnen máken. Per stap gegroepeerd,
 # want alleen een stap die daadwerkelijk getoond is mag z'n velden wissen.
 CLEARABLE_BATTERY_FIELDS = (
@@ -807,6 +830,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             solar_data, errors = _validate_solar(user_input)
+            errors = errors or _solar_unit_errors(self.hass, solar_data)
             if not errors:
                 return self._finish_entry({**self._p1_data, **solar_data})
 
@@ -1063,6 +1087,7 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             solar_data, errors = _validate_solar(user_input)
+            errors = errors or _solar_unit_errors(self.hass, solar_data)
             if not errors:
                 return self._save_options({
                     **self._p1_data,

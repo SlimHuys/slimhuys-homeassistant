@@ -59,6 +59,18 @@ from .const import (
     CONF_P1_VOLTAGE_L3,
     CONF_PULL_POLL_FALLBACK,
     CONF_PULL_PROBE_AT_SETUP,
+    CONF_CHARGER_BRAND,
+    CONF_CHARGER_ENABLED,
+    CONF_CHARGER_EXTERNAL_ID,
+    CONF_CHARGER_INTERVAL,
+    CONF_CHARGER_MAX_CURRENT,
+    CONF_CHARGER_NAME,
+    CONF_CHARGER_PHASES,
+    CONF_CHARGER_PLUGGED,
+    CONF_CHARGER_POWER,
+    CONF_CHARGER_SESSION,
+    CONF_CHARGER_STATUS,
+    CONF_CHARGER_TOTAL,
     CONF_SOLAR_CAPACITY,
     CONF_SOLAR_ENABLED,
     CONF_SOLAR_EXTERNAL_ID,
@@ -72,15 +84,19 @@ from .const import (
     DEFAULT_P1_INTERVAL,
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
+    DEFAULT_CHARGER_INTERVAL,
+    DEFAULT_CHARGER_PHASES,
     DEFAULT_SOLAR_INTERVAL,
     ENERGY_UNITS,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_BATTERY_INTERVAL,
     MAX_P1_INTERVAL,
+    MAX_CHARGER_INTERVAL,
     MAX_SOLAR_INTERVAL,
     MIN_BATTERY_INTERVAL,
     MIN_P1_INTERVAL,
+    MIN_CHARGER_INTERVAL,
     MIN_SOLAR_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
@@ -574,6 +590,96 @@ def _solar_unit_errors(hass, data: dict) -> dict[str, str]:
     return errors
 
 
+# ---------- Laadpaal ----------
+
+# (veld, toegestane domeinen). Status mag een sensor (Peblar `cp_state`) of
+# select zijn; de stroomlimiet is bij de meeste laders een `number`.
+CHARGER_ENTITY_FIELDS = (
+    (CONF_CHARGER_POWER, ["sensor"]),
+    (CONF_CHARGER_STATUS, ["sensor", "select"]),
+    (CONF_CHARGER_PLUGGED, ["binary_sensor"]),
+    (CONF_CHARGER_SESSION, ["sensor"]),
+    (CONF_CHARGER_TOTAL, ["sensor"]),
+    (CONF_CHARGER_MAX_CURRENT, ["number", "sensor"]),
+)
+
+CHARGER_TEXT_FIELDS = (
+    CONF_CHARGER_NAME,
+    CONF_CHARGER_BRAND,
+    CONF_CHARGER_EXTERNAL_ID,
+)
+
+
+def _charger_schema(defaults: dict | None = None) -> dict:
+    """Schema-dict voor de laadpaal-stap. Zelfde opzet als _solar_schema.
+
+    Altijd getoond, standaard uit — zelfde afweging als bij zon: er is geen
+    betrouwbare manier om "dit is een laadpaal" aan een entity te zien.
+    """
+    defaults = defaults or {}
+
+    schema: dict = {
+        vol.Required(
+            CONF_CHARGER_ENABLED,
+            default=bool(defaults.get(CONF_CHARGER_ENABLED, False)),
+        ): bool,
+    }
+    for key, domains in CHARGER_ENTITY_FIELDS:
+        value = defaults.get(key)
+        schema[vol.Optional(
+            key, description={"suggested_value": value} if value else {}
+        )] = EntitySelector(EntitySelectorConfig(domain=domains))
+    schema[vol.Optional(
+        CONF_CHARGER_PHASES,
+        default=int(defaults.get(CONF_CHARGER_PHASES, DEFAULT_CHARGER_PHASES)),
+    )] = vol.All(vol.Coerce(int), vol.In([1, 3]))
+    schema[vol.Optional(
+        CONF_CHARGER_INTERVAL,
+        default=max(MIN_CHARGER_INTERVAL, min(MAX_CHARGER_INTERVAL, int(
+            defaults.get(CONF_CHARGER_INTERVAL, DEFAULT_CHARGER_INTERVAL)
+        ))),
+    )] = vol.All(vol.Coerce(int), vol.Range(min=MIN_CHARGER_INTERVAL, max=MAX_CHARGER_INTERVAL))
+    for key in CHARGER_TEXT_FIELDS:
+        value = defaults.get(key)
+        schema[vol.Optional(
+            key, description={"suggested_value": value} if value else {}
+        )] = str
+    return schema
+
+
+def _validate_charger(user_input: dict) -> tuple[dict, dict]:
+    """→ (opgeschoonde config, errors). Zelfde opzet als _validate_solar."""
+    cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+    if not user_input.get(CONF_CHARGER_ENABLED):
+        cleaned[CONF_CHARGER_ENABLED] = False
+        return cleaned, {}
+
+    # Zonder vermogen of status valt er niets zinnigs over de lader te zeggen.
+    if not (user_input.get(CONF_CHARGER_POWER) or user_input.get(CONF_CHARGER_STATUS)):
+        return {}, {CONF_CHARGER_POWER: "charger_source_required"}
+
+    cleaned[CONF_CHARGER_ENABLED] = True
+    return cleaned, {}
+
+
+def _charger_unit_errors(hass, data: dict) -> dict[str, str]:
+    """Een energie-sensor in het vermogens-veld, of andersom."""
+    if not data.get(CONF_CHARGER_ENABLED):
+        return {}
+
+    def _unit(key) -> str | None:
+        state = hass.states.get(data[key]) if data.get(key) else None
+        return (state.attributes.get("unit_of_measurement") or "").lower() if state else None
+
+    errors: dict[str, str] = {}
+    if _unit(CONF_CHARGER_POWER) in ENERGY_UNITS:
+        errors[CONF_CHARGER_POWER] = "charger_power_is_energy"
+    for key in (CONF_CHARGER_SESSION, CONF_CHARGER_TOTAL):
+        if _unit(key) in ("w", "kw", "mw", "watt", "kilowatt", "megawatt"):
+            errors[key] = "charger_energy_is_power"
+    return errors
+
+
 # Velden die de OptionsFlow leeg moet kunnen máken. Per stap gegroepeerd,
 # want alleen een stap die daadwerkelijk getoond is mag z'n velden wissen.
 CLEARABLE_BATTERY_FIELDS = (
@@ -581,6 +687,9 @@ CLEARABLE_BATTERY_FIELDS = (
 )
 CLEARABLE_SOLAR_FIELDS = (
     *SOLAR_ENTITY_FIELDS, *SOLAR_TEXT_FIELDS, CONF_SOLAR_CAPACITY,
+)
+CLEARABLE_CHARGER_FIELDS = (
+    *(key for key, _ in CHARGER_ENTITY_FIELDS), *CHARGER_TEXT_FIELDS,
 )
 
 
@@ -832,11 +941,27 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             solar_data, errors = _validate_solar(user_input)
             errors = errors or _solar_unit_errors(self.hass, solar_data)
             if not errors:
-                return self._finish_entry({**self._p1_data, **solar_data})
+                self._p1_data = {**self._p1_data, **solar_data}
+                return await self.async_step_charger()
 
         return self.async_show_form(
             step_id="solar",
             data_schema=vol.Schema(_solar_schema(user_input or {})),
+            errors=errors,
+        )
+
+    async def async_step_charger(self, user_input: dict[str, Any] | None = None):
+        """Stap 7: laadpaal → SlimHuys (optioneel)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            charger_data, errors = _validate_charger(user_input)
+            errors = errors or _charger_unit_errors(self.hass, charger_data)
+            if not errors:
+                return self._finish_entry({**self._p1_data, **charger_data})
+
+        return self.async_show_form(
+            step_id="charger",
+            data_schema=vol.Schema(_charger_schema(user_input or {})),
             errors=errors,
         )
 
@@ -1089,10 +1214,11 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
             solar_data, errors = _validate_solar(user_input)
             errors = errors or _solar_unit_errors(self.hass, solar_data)
             if not errors:
-                return self._save_options({
+                self._p1_data = {
                     **self._p1_data,
                     **_cleared(solar_data, CLEARABLE_SOLAR_FIELDS),
-                })
+                }
+                return await self.async_step_charger()
 
         entry = self.config_entry
 
@@ -1108,6 +1234,34 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="solar",
             data_schema=vol.Schema(_solar_schema(defaults)),
+            errors=errors,
+        )
+
+    async def async_step_charger(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            charger_data, errors = _validate_charger(user_input)
+            errors = errors or _charger_unit_errors(self.hass, charger_data)
+            if not errors:
+                return self._save_options({
+                    **self._p1_data,
+                    **_cleared(charger_data, CLEARABLE_CHARGER_FIELDS),
+                })
+
+        entry = self.config_entry
+
+        def get(key, default=None):
+            return entry.options.get(key, entry.data.get(key, default))
+
+        defaults = user_input or {
+            k: v for k in (
+                CONF_CHARGER_ENABLED, CONF_CHARGER_INTERVAL, CONF_CHARGER_PHASES,
+                *(key for key, _ in CHARGER_ENTITY_FIELDS), *CHARGER_TEXT_FIELDS,
+            ) if (v := get(k)) is not None
+        }
+        return self.async_show_form(
+            step_id="charger",
+            data_schema=vol.Schema(_charger_schema(defaults)),
             errors=errors,
         )
 

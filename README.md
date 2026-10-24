@@ -183,6 +183,35 @@ mee zodra de opwek binnenkomt. Reken op zo'n vijf tot tien minuten voor de
 eerste waarden zichtbaar zijn: SlimHuys sluit kwartieren af en de dagsensoren
 pollen elke vijf minuten.
 
+## Laadpaal (v1.16.0)
+
+Voor laadpalen zonder cloud-koppeling in SlimHuys: **Peblar**, Alfen, Wallbox,
+go-e en alles wat Home Assistant verder uitleest. (Easee en Zaptec koppel je
+rechtstreeks op slimhuys.nl.) SlimHuys leest de laadpaal voorlopig alleen uit;
+aansturen volgt later.
+
+Koppel de laadpaal eerst in Home Assistant zelf (Peblar: **Instellingen →
+Apparaten & diensten → Integratie toevoegen → Peblar**), daarna **SlimHuys →
+Opties → Laadpaal**.
+
+| Veld | Verplicht | Peblar-entity |
+|---|---|---|
+| Laadvermogen nu | ja¹ | `sensor.<naam>_power` |
+| Status | ja¹ | `sensor.<naam>_state` |
+| Auto aangesloten | nee | — (alleen voor laders met zo'n binary sensor) |
+| Energie deze sessie | nee | `sensor.<naam>_session_energy` |
+| Totaal geladen | nee | `sensor.<naam>_lifetime_energy` |
+| Stroomlimiet | nee | `number.<naam>_charge_limit` |
+| Fasen, naam, merk, id | nee | |
+
+¹ Minstens één van de twee. De status mag vrije tekst zijn (`charging`,
+`no_ev_connected`, "Waiting for car"); SlimHuys vertaalt die zelf naar laden /
+aangesloten / vrij. Met de stroomlimiet en het aantal fasen rekent SlimHuys het
+laadvermogen uit, zodat een slim laadmoment weet hoe lang je auto moet laden.
+
+De laadpaal verschijnt op slimhuys.nl onder **Apparaten** en **Integraties**
+zodra de eerste meting binnen is.
+
 ### Prijsarrays voor dashboards
 
 `prijzen_vandaag` en `prijzen_morgen` stellen de hele dag als attributen beschikbaar — compatibel met ApexCharts-Card, Energy Tariff Card en andere community-cards die de Nordpool/ENTSO-e-conventie volgen:

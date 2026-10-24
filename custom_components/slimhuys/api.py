@@ -160,6 +160,24 @@ class SlimHuysClient:
             "POST", "/v1/me/solar/readings", json=payload, with_auth=True
         )
 
+    async def push_charger_readings(
+        self,
+        readings: list[dict[str, Any]],
+        charger: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """POST /v1/me/charger/readings.
+
+        `charger` is de metadata-envelope waarop de API auto-provisiont
+        (`external_id`, `name`, `brand`). `status` mag vrije tekst zijn;
+        de API vertaalt 'm naar laden/aangesloten/vrij.
+        """
+        payload: dict[str, Any] = {"readings": readings}
+        if charger:
+            payload["charger"] = charger
+        return await self._request(
+            "POST", "/v1/me/charger/readings", json=payload, with_auth=True
+        )
+
     async def current_usage(self) -> dict[str, Any]:
         """Snapshot — `live` (laatste reading), `today`, `meter`, `solar`.
 

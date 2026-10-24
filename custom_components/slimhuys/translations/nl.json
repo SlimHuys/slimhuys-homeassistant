@@ -1,6 +1,24 @@
 {
   "config": {
     "step": {
+      "charger": {
+        "title": "Laadpaal (optioneel)",
+        "description": "Stuur je laadpaal door naar SlimHuys — voor laders zonder cloud-koppeling in SlimHuys, zoals Peblar, Alfen, Wallbox en go-e. Laat de schakelaar uit om over te slaan.\n\nKoppel de laadpaal eerst in Home Assistant zelf (Peblar: Instellingen → Apparaten → Integratie toevoegen → Peblar). Kies daarna minstens het vermogen of de status. Met de stroomlimiet kan SlimHuys inschatten hoe lang het laden van je auto duurt voor een slim laadmoment.\n\nSlimHuys leest de laadpaal voorlopig alleen uit; aansturen doet het nog niet.",
+        "data": {
+          "charger_enabled": "Laadpaal doorsturen naar SlimHuys",
+          "charger_power_sensor": "Laadvermogen nu (W of kW)",
+          "charger_status_entity": "Status van de lader (Peblar: state)",
+          "charger_plugged_entity": "Auto aangesloten (binary sensor, optioneel)",
+          "charger_session_sensor": "Energie deze laadsessie (Wh of kWh)",
+          "charger_total_sensor": "Totaal geladen ooit (kWh, reset nooit)",
+          "charger_max_current_entity": "Stroomlimiet (A; Peblar: charge limit)",
+          "charger_phases": "Aantal fasen",
+          "charger_interval_seconds": "Push-interval (seconden, min 1)",
+          "charger_name": "Naam",
+          "charger_brand": "Merk (bijv. Peblar)",
+          "charger_external_id": "Lader-id (als je er meer dan één hebt)"
+        }
+      },
       "user": {
         "title": "SlimHuys",
         "description": "Vul je SlimHuys API-key in. Maak er één aan op slimhuys.nl/app/account?tab=api.",
@@ -93,6 +111,9 @@
       }
     },
     "error": {
+      "charger_source_required": "Kies minstens het laadvermogen of de status van de lader.",
+      "charger_power_is_energy": "Dit is een energie-sensor (Wh/kWh), geen vermogen. Kies een sensor in W of kW.",
+      "charger_energy_is_power": "Dit is een vermogens-sensor (W/kW), geen energie. Kies een sensor in Wh of kWh.",
       "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
       "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
       "solar_source_required": "Kies een opwek-sensor (vermogen of kWh-teller), of zet de zonnepanelen-push uit.",
@@ -107,6 +128,24 @@
   },
   "options": {
     "step": {
+      "charger": {
+        "title": "Laadpaal (optioneel)",
+        "description": "Stuur je laadpaal door naar SlimHuys — voor laders zonder cloud-koppeling in SlimHuys, zoals Peblar, Alfen, Wallbox en go-e. Laat de schakelaar uit om over te slaan.\n\nKoppel de laadpaal eerst in Home Assistant zelf (Peblar: Instellingen → Apparaten → Integratie toevoegen → Peblar). Kies daarna minstens het vermogen of de status. Met de stroomlimiet kan SlimHuys inschatten hoe lang het laden van je auto duurt voor een slim laadmoment.\n\nSlimHuys leest de laadpaal voorlopig alleen uit; aansturen doet het nog niet.",
+        "data": {
+          "charger_enabled": "Laadpaal doorsturen naar SlimHuys",
+          "charger_power_sensor": "Laadvermogen nu (W of kW)",
+          "charger_status_entity": "Status van de lader (Peblar: state)",
+          "charger_plugged_entity": "Auto aangesloten (binary sensor, optioneel)",
+          "charger_session_sensor": "Energie deze laadsessie (Wh of kWh)",
+          "charger_total_sensor": "Totaal geladen ooit (kWh, reset nooit)",
+          "charger_max_current_entity": "Stroomlimiet (A; Peblar: charge limit)",
+          "charger_phases": "Aantal fasen",
+          "charger_interval_seconds": "Push-interval (seconden, min 1)",
+          "charger_name": "Naam",
+          "charger_brand": "Merk (bijv. Peblar)",
+          "charger_external_id": "Lader-id (als je er meer dan één hebt)"
+        }
+      },
       "init": {
         "title": "SlimHuys-instellingen",
         "data": {
@@ -182,6 +221,9 @@
       }
     },
     "error": {
+      "charger_source_required": "Kies minstens het laadvermogen of de status van de lader.",
+      "charger_power_is_energy": "Dit is een energie-sensor (Wh/kWh), geen vermogen. Kies een sensor in W of kW.",
+      "charger_energy_is_power": "Dit is een vermogens-sensor (W/kW), geen energie. Kies een sensor in Wh of kWh.",
       "battery_soc_required": "Kies een laadtoestand-sensor, of zet de batterij-push uit.",
       "battery_power_required": "Kies óf een signed vermogenssensor, óf een laden/ontladen-paar.",
       "solar_source_required": "Kies een opwek-sensor (vermogen of kWh-teller), of zet de zonnepanelen-push uit.",

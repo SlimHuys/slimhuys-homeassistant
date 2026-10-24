@@ -67,6 +67,18 @@ from .const import (
     CONF_P1_VOLTAGE_L3,
     CONF_PULL_POLL_FALLBACK,
     CONF_PULL_PROBE_AT_SETUP,
+    CONF_CHARGER_BRAND,
+    CONF_CHARGER_ENABLED,
+    CONF_CHARGER_EXTERNAL_ID,
+    CONF_CHARGER_INTERVAL,
+    CONF_CHARGER_MAX_CURRENT,
+    CONF_CHARGER_NAME,
+    CONF_CHARGER_PHASES,
+    CONF_CHARGER_PLUGGED,
+    CONF_CHARGER_POWER,
+    CONF_CHARGER_SESSION,
+    CONF_CHARGER_STATUS,
+    CONF_CHARGER_TOTAL,
     CONF_SOLAR_CAPACITY,
     CONF_SOLAR_ENABLED,
     CONF_SOLAR_EXTERNAL_ID,
@@ -79,13 +91,17 @@ from .const import (
     DEFAULT_P1_INTERVAL,
     DEFAULT_PULL_POLL_FALLBACK,
     DEFAULT_PULL_PROBE_AT_SETUP,
+    DEFAULT_CHARGER_INTERVAL,
+    DEFAULT_CHARGER_PHASES,
     DEFAULT_SOLAR_INTERVAL,
     ENERGY_UNITS,
     DEFAULT_SUPPLIER,
     DOMAIN,
     MAX_P1_INTERVAL,
+    MAX_CHARGER_INTERVAL,
     MAX_SOLAR_INTERVAL,
     MIN_P1_INTERVAL,
+    MIN_CHARGER_INTERVAL,
     MIN_SOLAR_INTERVAL,
     P1_MODE_NONE,
     P1_MODE_PULL,
@@ -213,6 +229,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "solar_unsub": None,
         "solar_pending_unsub": None,
         "solar_timer_unsub": None,
+        "charger_unsub": None,
+        "charger_pending_unsub": None,
+        "charger_timer_unsub": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -232,6 +251,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Idem voor de zonnepanelen: SlimHuys kent opwek alleen uit een
     # cloud-koppeling met de omvormer, en die bestaat niet voor elk merk.
     _maybe_start_solar_push(hass, entry)
+
+    # En voor laadpalen zonder publieke cloud-API (Peblar, Alfen, …).
+    _maybe_start_charger_push(hass, entry)
 
     # Service push_reading: voor users die liever zelf via automation pushen
     if not hass.services.has_service(DOMAIN, SERVICE_PUSH_READING):
@@ -289,6 +311,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["solar_pending_unsub"]()
     if state.get("solar_timer_unsub"):
         state["solar_timer_unsub"]()
+    for key in ("charger_unsub", "charger_pending_unsub", "charger_timer_unsub"):
+        if state.get(key):
+            state[key]()
     live: SlimHuysLiveCoordinator | None = state.get("live_coordinator")
     if live is not None:
         await live.async_stop()
@@ -1083,6 +1108,183 @@ def _maybe_start_solar_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
         hass, sensors_to_watch, _on_state_change
     )
     state["solar_timer_unsub"] = async_track_time_interval(
+        hass, _tick, timedelta(seconds=interval)
+    )
+
+
+def _maybe_start_charger_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Laadpaal → `POST /v1/me/charger/readings`, state-change-driven.
+
+    Zelfde throttle/backoff/hartslag-patroon als de zonnepanelen-push. Geen
+    409-pad: een tweede bron voor dezelfde lader telt nergens dubbel, de API
+    bewaart van een laadpaal alleen de laatste staat.
+    """
+    def _get(key, default=None):
+        return entry.options.get(key, entry.data.get(key, default))
+
+    if not _get(CONF_CHARGER_ENABLED, False):
+        return
+
+    power = _get(CONF_CHARGER_POWER)
+    status = _get(CONF_CHARGER_STATUS)
+    plugged = _get(CONF_CHARGER_PLUGGED)
+    session = _get(CONF_CHARGER_SESSION)
+    total = _get(CONF_CHARGER_TOTAL)
+    max_current = _get(CONF_CHARGER_MAX_CURRENT)
+    if not (power or status):
+        _LOGGER.warning(
+            "Laadpaal-push staat aan maar mist een vermogens- én een "
+            "status-entity; overgeslagen"
+        )
+        return
+
+    interval = max(
+        MIN_CHARGER_INTERVAL,
+        min(MAX_CHARGER_INTERVAL, int(_get(CONF_CHARGER_INTERVAL, DEFAULT_CHARGER_INTERVAL))),
+    )
+    phases = int(_get(CONF_CHARGER_PHASES, DEFAULT_CHARGER_PHASES) or DEFAULT_CHARGER_PHASES)
+
+    charger_meta = {
+        key: value
+        for key, value in (
+            ("external_id", _get(CONF_CHARGER_EXTERNAL_ID)),
+            ("name", _get(CONF_CHARGER_NAME)),
+            ("brand", _get(CONF_CHARGER_BRAND)),
+        )
+        if value not in (None, "")
+    }
+
+    state = hass.data[DOMAIN][entry.entry_id]
+    client: SlimHuysClient = state["client"]
+    push_state: dict[str, Any] = {"last_attempt": 0.0, "failures": 0, "in_flight": False}
+
+    def _current_interval() -> float:
+        if not push_state["failures"]:
+            return float(interval)
+        return min(interval * 2 ** push_state["failures"], PUSH_BACKOFF_MAX_INTERVAL)
+
+    def _elapsed() -> float:
+        if not push_state["last_attempt"]:
+            return float("inf")
+        return monotonic() - push_state["last_attempt"]
+
+    def _state(entity_id: str | None):
+        if not entity_id:
+            return None
+        s = hass.states.get(entity_id)
+        if not s or s.state in ("unknown", "unavailable", None):
+            return None
+        return s
+
+    def _read_float(entity_id: str | None) -> tuple[float, str] | None:
+        s = _state(entity_id)
+        if s is None:
+            return None
+        try:
+            value = float(s.state)
+        except (ValueError, TypeError):
+            return None
+        return value, (s.attributes.get("unit_of_measurement") or "").lower()
+
+    def _read_power_w() -> int | None:
+        read = _read_float(power)
+        if read is None:
+            return None
+        value, unit = read
+        if unit in ENERGY_UNITS:
+            return None  # verkeerd gekozen sensor; de config-flow waarschuwt al
+        if unit in ("kw", "kilowatt"):
+            value *= 1000
+        return int(round(value))
+
+    def _read_energy_kwh(entity_id: str | None) -> float | None:
+        read = _read_float(entity_id)
+        if read is None:
+            return None
+        value, unit = read
+        # Sessie-energie staat bij veel laders in Wh (Peblar), en die als kWh
+        # doorsturen maakt van een avondje laden 7000 kWh.
+        if unit in ("wh", "watt-hour", "watthour"):
+            value /= 1000
+        elif unit in ("mwh", "megawatt-hour"):
+            value *= 1000
+        if value < 0:
+            return None
+        return round(value, 3)
+
+    async def _do_push(_now=None) -> None:
+        state["charger_pending_unsub"] = None
+        if push_state["in_flight"]:
+            return
+
+        payload: dict[str, Any] = {"timestamp": _now_iso()}
+        power_w = _read_power_w()
+        if power_w is not None:
+            payload["power_w"] = power_w
+        s = _state(status)
+        if s is not None:
+            payload["status"] = str(s.state)[:64]
+        p = _state(plugged)
+        if p is not None and p.state in ("on", "off"):
+            payload["plugged_in"] = p.state == "on"
+        for key, entity_id in (("session_kwh", session), ("lifetime_kwh", total)):
+            value = _read_energy_kwh(entity_id)
+            if value is not None:
+                payload[key] = value
+        current = _read_float(max_current)
+        if current is not None and current[0] > 0:
+            payload["max_current_a"] = round(current[0], 1)
+            payload["phases"] = phases
+        if len(payload) == 1:
+            return  # geen enkele meetwaarde beschikbaar; niets doorzetten
+
+        push_state["in_flight"] = True
+        push_state["last_attempt"] = monotonic()
+        try:
+            await client.push_charger_readings([payload], charger_meta or None)
+            if push_state["failures"]:
+                _LOGGER.debug(
+                    "SlimHuys laadpaal-push hersteld na %d fouten", push_state["failures"]
+                )
+                push_state["failures"] = 0
+        except SlimHuysApiError as err:
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.debug(
+                "SlimHuys laadpaal-push faalde (poging %d, volgende over %.0fs): %s",
+                push_state["failures"], _current_interval(), err,
+            )
+        except Exception as err:  # noqa: BLE001
+            push_state["failures"] = min(push_state["failures"] + 1, PUSH_BACKOFF_MAX_FAILURES)
+            _LOGGER.warning("Onverwachte fout in laadpaal-push: %s", err)
+        finally:
+            push_state["in_flight"] = False
+
+    @callback
+    def _on_state_change(_event) -> None:
+        if push_state["in_flight"] or state.get("charger_pending_unsub") is not None:
+            return
+        window = _current_interval()
+        elapsed = _elapsed()
+        if elapsed >= window:
+            hass.async_create_task(_do_push())
+        else:
+            state["charger_pending_unsub"] = async_call_later(
+                hass, max(0.1, window - elapsed), _do_push
+            )
+
+    async def _tick(_now) -> None:
+        """Hartslag — een lader zonder auto staat uren stil zonder state-change."""
+        if push_state["in_flight"] or _elapsed() < _current_interval():
+            return
+        await _do_push()
+
+    sensors_to_watch = [
+        e for e in (power, status, plugged, session, total, max_current) if e
+    ]
+    state["charger_unsub"] = async_track_state_change_event(
+        hass, sensors_to_watch, _on_state_change
+    )
+    state["charger_timer_unsub"] = async_track_time_interval(
         hass, _tick, timedelta(seconds=interval)
     )
 

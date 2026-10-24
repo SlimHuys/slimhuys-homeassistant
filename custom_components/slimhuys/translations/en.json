@@ -1,6 +1,24 @@
 {
   "config": {
     "step": {
+      "charger": {
+        "title": "EV charger (optional)",
+        "description": "Push your EV charger to SlimHuys — for chargers without a cloud link in SlimHuys, such as Peblar, Alfen, Wallbox and go-e. Leave the toggle off to skip.\n\nLink the charger in Home Assistant first (Peblar: Settings → Devices → Add integration → Peblar). Then pick at least the power or the status. With the current limit, SlimHuys can estimate how long charging your car takes for a smart charging moment.\n\nSlimHuys only reads the charger for now; it does not control it.",
+        "data": {
+          "charger_enabled": "Push charger to SlimHuys",
+          "charger_power_sensor": "Charging power right now (W or kW)",
+          "charger_status_entity": "Charger state (Peblar: state)",
+          "charger_plugged_entity": "Car plugged in (binary sensor, optional)",
+          "charger_session_sensor": "Energy this session (Wh or kWh)",
+          "charger_total_sensor": "Total energy ever (kWh, never resets)",
+          "charger_max_current_entity": "Current limit (A; Peblar: charge limit)",
+          "charger_phases": "Number of phases",
+          "charger_interval_seconds": "Push interval (seconds, min 1)",
+          "charger_name": "Name",
+          "charger_brand": "Brand (e.g. Peblar)",
+          "charger_external_id": "Charger id (when you have more than one)"
+        }
+      },
       "user": {
         "title": "SlimHuys",
         "description": "Enter your SlimHuys API key. Generate one at slimhuys.nl/app/account?tab=api.",
@@ -93,6 +111,9 @@
       }
     },
     "error": {
+      "charger_source_required": "Pick at least the charging power or the charger state.",
+      "charger_power_is_energy": "This is an energy sensor (Wh/kWh), not power. Pick a sensor in W or kW.",
+      "charger_energy_is_power": "This is a power sensor (W/kW), not energy. Pick a sensor in Wh or kWh.",
       "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
       "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
       "solar_source_required": "Pick a production sensor (power or kWh counter), or turn the solar push off.",
@@ -107,6 +128,24 @@
   },
   "options": {
     "step": {
+      "charger": {
+        "title": "EV charger (optional)",
+        "description": "Push your EV charger to SlimHuys — for chargers without a cloud link in SlimHuys, such as Peblar, Alfen, Wallbox and go-e. Leave the toggle off to skip.\n\nLink the charger in Home Assistant first (Peblar: Settings → Devices → Add integration → Peblar). Then pick at least the power or the status. With the current limit, SlimHuys can estimate how long charging your car takes for a smart charging moment.\n\nSlimHuys only reads the charger for now; it does not control it.",
+        "data": {
+          "charger_enabled": "Push charger to SlimHuys",
+          "charger_power_sensor": "Charging power right now (W or kW)",
+          "charger_status_entity": "Charger state (Peblar: state)",
+          "charger_plugged_entity": "Car plugged in (binary sensor, optional)",
+          "charger_session_sensor": "Energy this session (Wh or kWh)",
+          "charger_total_sensor": "Total energy ever (kWh, never resets)",
+          "charger_max_current_entity": "Current limit (A; Peblar: charge limit)",
+          "charger_phases": "Number of phases",
+          "charger_interval_seconds": "Push interval (seconds, min 1)",
+          "charger_name": "Name",
+          "charger_brand": "Brand (e.g. Peblar)",
+          "charger_external_id": "Charger id (when you have more than one)"
+        }
+      },
       "init": {
         "title": "SlimHuys settings",
         "data": {
@@ -182,6 +221,9 @@
       }
     },
     "error": {
+      "charger_source_required": "Pick at least the charging power or the charger state.",
+      "charger_power_is_energy": "This is an energy sensor (Wh/kWh), not power. Pick a sensor in W or kW.",
+      "charger_energy_is_power": "This is a power sensor (W/kW), not energy. Pick a sensor in Wh or kWh.",
       "battery_soc_required": "Pick a charge-level sensor, or turn the battery push off.",
       "battery_power_required": "Pick either a signed power sensor or a charge/discharge pair.",
       "solar_source_required": "Pick a production sensor (power or kWh counter), or turn the solar push off.",

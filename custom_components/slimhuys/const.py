@@ -210,6 +210,34 @@ MAX_SOLAR_INTERVAL = 300
 # pollen per 15 min), zodat die niet onterecht wegvallen.
 SOLAR_POWER_STALE_SECONDS = 1800
 
+# ----- Laadpaal (HA → SlimHuys, `POST /v1/me/charger/readings`) -----
+# Voor laders zonder publieke cloud-API (Peblar, Alfen, Wallbox, go-e): HA
+# leest ze lokaal uit, SlimHuys kan dat niet. Alleen uitlezen; aansturen
+# volgt later via hetzelfde acties-mechanisme als Easee/Zaptec.
+CONF_CHARGER_ENABLED = "charger_enabled"
+CONF_CHARGER_POWER = "charger_power_sensor"
+# Vrije status-tekst (Peblar `cp_state`: no_ev_connected/suspended/charging).
+# De vertaling naar laden/aangesloten/vrij doet de API, zodat een nieuw merk
+# geen update van deze integratie vereist.
+CONF_CHARGER_STATUS = "charger_status_entity"
+# Alternatief/aanvulling op status: "auto aangesloten" als binary_sensor.
+CONF_CHARGER_PLUGGED = "charger_plugged_entity"
+CONF_CHARGER_SESSION = "charger_session_sensor"
+CONF_CHARGER_TOTAL = "charger_total_sensor"
+# Stroomlimiet in A (Peblar: `number.*_charge_limit`). SlimHuys rekent er het
+# laadvermogen uit voor de laadduur van een slim laadmoment.
+CONF_CHARGER_MAX_CURRENT = "charger_max_current_entity"
+CONF_CHARGER_PHASES = "charger_phases"
+CONF_CHARGER_INTERVAL = "charger_interval_seconds"
+CONF_CHARGER_NAME = "charger_name"
+CONF_CHARGER_BRAND = "charger_brand"
+CONF_CHARGER_EXTERNAL_ID = "charger_external_id"
+
+DEFAULT_CHARGER_INTERVAL = 30
+MIN_CHARGER_INTERVAL = 1
+MAX_CHARGER_INTERVAL = 300
+DEFAULT_CHARGER_PHASES = 3
+
 # Eenheden waaraan een energie-sensor te herkennen is. Een vermogens-veld met
 # zo'n eenheid is een verkeerd gekozen sensor, geen vermogen.
 ENERGY_UNITS = ("wh", "kwh", "mwh", "watt-hour", "watthour", "kilowatt-hour", "megawatt-hour")

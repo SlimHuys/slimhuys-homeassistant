@@ -11,6 +11,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -269,6 +272,15 @@ def _add_optional_phase_fields(
     def _safe_default(value, choices):
         return value if value in choices else vol.UNDEFINED
 
+    def _optional(key, value):
+        # `suggested_value` i.p.v. `default`, zelfde reden als bij batterij en
+        # zon: wist de gebruiker het veld (kruisje of "—"), dan stuurt de
+        # frontend de sleutel niet mee en zou een `default` de oude sensor
+        # er stilletjes weer in zetten.
+        if value is vol.UNDEFINED:
+            return vol.Optional(key)
+        return vol.Optional(key, description={"suggested_value": value})
+
     def _value_for(key, candidates_by_phase, fallback_suggester=None):
         if key in defaults:
             return _safe_default(defaults[key], _choices_for(key))
@@ -309,23 +321,23 @@ def _add_optional_phase_fields(
         choices = _choices_for(key)
         if not choices:
             continue
-        default = _value_for(key, candidates, lambda c=candidates, p=phase: _suggest_phase(c, p))
-        schema_dict[vol.Optional(key, default=default)] = vol.In({**choices, "": "—"})
+        value = _value_for(key, candidates, lambda c=candidates, p=phase: _suggest_phase(c, p))
+        schema_dict[_optional(key, value)] = vol.In({**choices, "": "—"})
         added.append(key)
 
     if power_choices:
-        default = _value_for(
+        value = _value_for(
             CONF_P1_POWER_RETURNED, power_sensors,
             lambda c=power_sensors: _suggest_power_returned(c),
         )
-        schema_dict[vol.Optional(CONF_P1_POWER_RETURNED, default=default)] = vol.In(
+        schema_dict[_optional(CONF_P1_POWER_RETURNED, value)] = vol.In(
             {**power_choices, "": "—"}
         )
         added.append(CONF_P1_POWER_RETURNED)
 
     if gas_choices:
-        default = _value_for(CONF_P1_GAS, gas_sensors, lambda c=gas_sensors: _suggest_gas(c))
-        schema_dict[vol.Optional(CONF_P1_GAS, default=default)] = vol.In({**gas_choices, "": "—"})
+        value = _value_for(CONF_P1_GAS, gas_sensors, lambda c=gas_sensors: _suggest_gas(c))
+        schema_dict[_optional(CONF_P1_GAS, value)] = vol.In({**gas_choices, "": "—"})
         added.append(CONF_P1_GAS)
 
     return added
@@ -629,10 +641,17 @@ def _charger_schema(defaults: dict | None = None) -> dict:
         schema[vol.Optional(
             key, description={"suggested_value": value} if value else {}
         )] = EntitySelector(EntitySelectorConfig(domain=domains))
+    # Strings, geen ints: de frontend geeft een keuze als string terug en
+    # vergelijkt de bewaarde waarde daar ook als string mee. Met `vol.In([1, 3])`
+    # matchte de bewaarde 3 geen enkele optie en stond er niets geselecteerd.
+    # `_validate_charger` zet 'm terug naar int.
     schema[vol.Optional(
         CONF_CHARGER_PHASES,
-        default=int(defaults.get(CONF_CHARGER_PHASES, DEFAULT_CHARGER_PHASES)),
-    )] = vol.All(vol.Coerce(int), vol.In([1, 3]))
+        default=str(defaults.get(CONF_CHARGER_PHASES, DEFAULT_CHARGER_PHASES)),
+    )] = SelectSelector(SelectSelectorConfig(
+        options=["1", "3"],
+        mode=SelectSelectorMode.LIST,
+    ))
     schema[vol.Optional(
         CONF_CHARGER_INTERVAL,
         default=max(MIN_CHARGER_INTERVAL, min(MAX_CHARGER_INTERVAL, int(
@@ -650,6 +669,8 @@ def _charger_schema(defaults: dict | None = None) -> dict:
 def _validate_charger(user_input: dict) -> tuple[dict, dict]:
     """→ (opgeschoonde config, errors). Zelfde opzet als _validate_solar."""
     cleaned = {k: v for k, v in user_input.items() if v not in ("", None)}
+    if CONF_CHARGER_PHASES in cleaned:
+        cleaned[CONF_CHARGER_PHASES] = int(cleaned[CONF_CHARGER_PHASES])
     if not user_input.get(CONF_CHARGER_ENABLED):
         cleaned[CONF_CHARGER_ENABLED] = False
         return cleaned, {}

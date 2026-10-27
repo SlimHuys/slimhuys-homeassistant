@@ -55,6 +55,8 @@
         "data": {
           "p1_consumption_sensor": "Cumulatief verbruik (kWh, totaalstand)",
           "p1_delivery_sensor": "Cumulatieve teruglevering (kWh, totaalstand)",
+          "p1_consumption_t2_sensor": "Verbruik tarief 2 (kWh, alleen als je meter geen totaalstand heeft)",
+          "p1_delivery_t2_sensor": "Teruglevering tarief 2 (kWh, alleen als je meter geen totaalstand heeft)",
           "p1_power_sensor": "Huidig vermogen (W of kW)",
           "p1_interval_seconds": "Push-interval (seconden, min 1)",
           "p1_voltage_l1_sensor": "Spanning L1 (V, optioneel)",
@@ -165,6 +167,8 @@
         "data": {
           "p1_consumption_sensor": "Cumulatief verbruik (kWh)",
           "p1_delivery_sensor": "Cumulatieve teruglevering (kWh)",
+          "p1_consumption_t2_sensor": "Verbruik tarief 2 (kWh, alleen als je meter geen totaalstand heeft)",
+          "p1_delivery_t2_sensor": "Teruglevering tarief 2 (kWh, alleen als je meter geen totaalstand heeft)",
           "p1_power_sensor": "Huidig vermogen (W of kW)",
           "p1_interval_seconds": "Push-interval (seconden, min 1)",
           "p1_voltage_l1_sensor": "Spanning L1 (V, optioneel)",

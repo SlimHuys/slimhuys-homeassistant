@@ -381,7 +381,18 @@ wizard als ze in je HA-instance bestaan.
 > 300s) en springt het terug zodra een push weer slaagt. Je meter blijft
 > gewoon doorlopen; alleen het doorsturen wordt tijdelijk rustiger.
 
-Werkt out-of-the-box met DSMR Slimme meter (USB), HomeWizard P1, en Tibber Pulse.
+Werkt out-of-the-box met DSMR Slimme meter (USB), HomeWizard P1, Tibber Pulse en
+ESPHome-DSMR (SlimmeLezer e.d.).
+
+> **Meter zonder totaalstand?** ESPHome-DSMR publiceert alleen losse
+> registers voor tarief 1 en tarief 2 (`energy_consumed_tariff_1` / `_2`,
+> `energy_produced_tariff_1` / `_2`). Kies dan tarief 1 bij *Cumulatief
+> verbruik* en tarief 2 bij *Verbruik tarief 2* (idem voor teruglevering);
+> de integratie telt ze op tot één stand. Sinds v1.17.0 vult de wizard dat
+> paar zelf in. Heeft je meter wél een totaalstand (HomeWizard:
+> `energy_import`), laat de tarief-2-velden dan leeg — anders tel je dubbel.
+> Let op: bij ESPHome-DSMR betekent `delivered` *afname* (geleverd áán jou),
+> `returned`/`produced` is teruglevering.
 
 Wil je toch zelf via een automation pushen? De service `slimhuys.push_reading`
 blijft beschikbaar voor maatwerk.

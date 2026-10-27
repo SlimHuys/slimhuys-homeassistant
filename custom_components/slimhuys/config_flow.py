@@ -41,10 +41,12 @@ from .const import (
     CONF_BATTERY_SOC,
     CONF_BATTERY_TEMP,
     CONF_P1_CONSUMPTION,
+    CONF_P1_CONSUMPTION_T2,
     CONF_P1_CURRENT_L1,
     CONF_P1_CURRENT_L2,
     CONF_P1_CURRENT_L3,
     CONF_P1_DELIVERY,
+    CONF_P1_DELIVERY_T2,
     CONF_P1_ENABLED,
     CONF_P1_GAS,
     CONF_P1_INTERVAL,
@@ -106,34 +108,14 @@ from .const import (
     P1_MODE_PUSH,
 )
 
+from .p1_sensors import detect_dsmr_sensors, pick_register
+
 _LOGGER = logging.getLogger(__name__)
 
 
 def _detect_dsmr_sensors(hass) -> dict[str, list[str]]:
     """Naam-patroon-suggesties voor de drie defaults in de dropdowns."""
-    consumption: list[str] = []
-    delivery: list[str] = []
-    power: list[str] = []
-
-    for state in hass.states.async_all("sensor"):
-        eid = state.entity_id.lower()
-        if any(p in eid for p in [
-            "consumption_total", "energy_import", "_import_total", "imported_energy",
-            "stroom_verbruik_totaal", "verbruik_totaal", "_consumption", "_import",
-        ]):
-            consumption.append(state.entity_id)
-        elif any(p in eid for p in [
-            "delivery_total", "energy_export", "_export_total", "exported_energy",
-            "_teruglevering_totaal", "teruglevering_totaal", "_delivery", "_export",
-        ]):
-            delivery.append(state.entity_id)
-        elif any(p in eid for p in [
-            "current_electricity_usage", "active_power", "current_power",
-            "vermogen_nu", "current_consumption_w",
-        ]):
-            power.append(state.entity_id)
-
-    return {"consumption": consumption, "delivery": delivery, "power": power}
+    return detect_dsmr_sensors(s.entity_id for s in hass.states.async_all("sensor"))
 
 
 def _energy_sensors(hass) -> list[str]:
@@ -243,6 +225,18 @@ def _suggest_power_returned(candidates: list[str]) -> str | None:
         ),
         None,
     )
+
+
+def _optional_sensor(key: str, value: str | None):
+    """Optioneel sensorveld met voorinvulling die leeg te maken is.
+
+    `suggested_value` i.p.v. `default`: wist de gebruiker het veld, dan
+    stuurt de frontend de sleutel niet mee en zou een `default` de oude
+    sensor er stilletjes weer in zetten.
+    """
+    if not value:
+        return vol.Optional(key)
+    return vol.Optional(key, description={"suggested_value": value})
 
 
 def _add_optional_phase_fields(
@@ -867,6 +861,7 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_P1_INTERVAL: int(user_input.get(CONF_P1_INTERVAL, DEFAULT_P1_INTERVAL)),
             }
             for opt_key in (
+                CONF_P1_CONSUMPTION_T2, CONF_P1_DELIVERY_T2,
                 CONF_P1_VOLTAGE_L1, CONF_P1_VOLTAGE_L2, CONF_P1_VOLTAGE_L3,
                 CONF_P1_CURRENT_L1, CONF_P1_CURRENT_L2, CONF_P1_CURRENT_L3,
                 CONF_P1_POWER_L1, CONF_P1_POWER_L2, CONF_P1_POWER_L3,
@@ -890,12 +885,16 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         current_choices = {s: s for s in current_sensors}
         gas_choices = {s: s for s in gas_sensors}
 
-        default_consumption = next(
-            (s for s in suggestions["consumption"] if s in energy_sensors), None
-        ) or (energy_sensors[0] if energy_sensors else None)
-        default_delivery = next(
-            (s for s in suggestions["delivery"] if s in energy_sensors), None
-        ) or (energy_sensors[1] if len(energy_sensors) > 1 else None)
+        # Geen totaalstand maar wel tarief 1 + 2 (ESPHome-DSMR)? Dan staat
+        # tarief 1 als hoofdsensor en tarief 2 in het extra veld eronder.
+        default_consumption, default_consumption_t2 = pick_register(
+            suggestions["consumption"], energy_sensors
+        )
+        default_consumption = default_consumption or (energy_sensors[0] if energy_sensors else None)
+        default_delivery, default_delivery_t2 = pick_register(
+            suggestions["delivery"], energy_sensors
+        )
+        default_delivery = default_delivery or (energy_sensors[1] if len(energy_sensors) > 1 else None)
         default_power = next(
             (s for s in suggestions["power"] if s in power_sensors), None
         ) or (power_sensors[0] if power_sensors else None)
@@ -905,6 +904,8 @@ class SlimHuysConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             schema_dict.update({
                 vol.Required(CONF_P1_CONSUMPTION, default=default_consumption or vol.UNDEFINED): vol.In(energy_choices),
                 vol.Required(CONF_P1_DELIVERY, default=default_delivery or vol.UNDEFINED): vol.In(energy_choices),
+                _optional_sensor(CONF_P1_CONSUMPTION_T2, default_consumption_t2): vol.In(energy_choices),
+                _optional_sensor(CONF_P1_DELIVERY_T2, default_delivery_t2): vol.In(energy_choices),
                 vol.Required(CONF_P1_POWER, default=default_power or vol.UNDEFINED): vol.In(power_choices),
                 vol.Optional(CONF_P1_INTERVAL, default=DEFAULT_P1_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=MIN_P1_INTERVAL, max=MAX_P1_INTERVAL)
@@ -1117,8 +1118,11 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
 
         # Al ingestelde keuzes erbij, ook als de sensor nu buiten het
         # unit-filter valt — zie `_with_configured`.
+        current_p1_consumption_t2 = get(CONF_P1_CONSUMPTION_T2)
+        current_p1_delivery_t2 = get(CONF_P1_DELIVERY_T2)
         energy_choices = _with_configured(
-            {s: s for s in energy_sensors}, current_p1_consumption, current_p1_delivery
+            {s: s for s in energy_sensors}, current_p1_consumption, current_p1_delivery,
+            current_p1_consumption_t2, current_p1_delivery_t2,
         )
         power_choices = _with_configured(
             {s: s for s in power_sensors},
@@ -1154,6 +1158,8 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
             schema_dict.update({
                 vol.Required(CONF_P1_CONSUMPTION, default=safe_default(current_p1_consumption, energy_choices)): vol.In(energy_choices),
                 vol.Required(CONF_P1_DELIVERY, default=safe_default(current_p1_delivery, energy_choices)): vol.In(energy_choices),
+                _optional_sensor(CONF_P1_CONSUMPTION_T2, current_p1_consumption_t2): vol.In(energy_choices),
+                _optional_sensor(CONF_P1_DELIVERY_T2, current_p1_delivery_t2): vol.In(energy_choices),
                 vol.Required(CONF_P1_POWER, default=safe_default(current_p1_power, power_choices)): vol.In(power_choices),
                 vol.Optional(CONF_P1_INTERVAL, default=current_p1_interval): vol.All(
                     vol.Coerce(int), vol.Range(min=MIN_P1_INTERVAL, max=MAX_P1_INTERVAL)
@@ -1179,6 +1185,11 @@ class SlimHuysOptionsFlow(config_entries.OptionsFlow):
                 defaults=optional_defaults,
                 suggest=False,
             )
+            # De tarief-2-velden staan altijd op dit scherm, dus leegmaken
+            # moet ze ook echt wissen (zie `_cleared`).
+            self._p1_optional_shown = [
+                *self._p1_optional_shown, CONF_P1_CONSUMPTION_T2, CONF_P1_DELIVERY_T2,
+            ]
 
         return self.async_show_form(
             step_id="p1_push",

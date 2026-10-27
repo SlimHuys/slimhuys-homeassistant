@@ -45,6 +45,10 @@ CONF_P1_ENABLED = "p1_enabled"
 CONF_P1_CONSUMPTION = "p1_consumption_sensor"
 CONF_P1_DELIVERY = "p1_delivery_sensor"
 CONF_P1_POWER = "p1_power_sensor"
+# Tweede tariefregister voor meters zonder totaalstand (ESPHome-DSMR). De
+# push telt hoofd- en tarief-2-sensor op tot één cumulatieve stand.
+CONF_P1_CONSUMPTION_T2 = "p1_consumption_t2_sensor"
+CONF_P1_DELIVERY_T2 = "p1_delivery_t2_sensor"
 CONF_P1_INTERVAL = "p1_interval_seconds"
 
 # Optionele 3-fase + gas — leeg laten als de meter ze niet exposeert.

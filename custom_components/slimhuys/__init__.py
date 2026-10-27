@@ -46,10 +46,12 @@ from .const import (
     CONF_API_KEY,
     CONF_BASE_URL,
     CONF_P1_CONSUMPTION,
+    CONF_P1_CONSUMPTION_T2,
     CONF_P1_CURRENT_L1,
     CONF_P1_CURRENT_L2,
     CONF_P1_CURRENT_L3,
     CONF_P1_DELIVERY,
+    CONF_P1_DELIVERY_T2,
     CONF_P1_ENABLED,
     CONF_P1_GAS,
     CONF_P1_INTERVAL,
@@ -114,6 +116,7 @@ from .const import (
 )
 from .coordinator import SlimHuysCoordinator
 from .live_coordinator import SlimHuysLiveCoordinator
+from .p1_sensors import sum_registers
 from .usage_coordinator import SlimHuysUsageCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -392,6 +395,8 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
     enabled = _get(CONF_P1_ENABLED, False)
     consumption = _get(CONF_P1_CONSUMPTION)
     delivery = _get(CONF_P1_DELIVERY)
+    consumption_t2 = _get(CONF_P1_CONSUMPTION_T2)
+    delivery_t2 = _get(CONF_P1_DELIVERY_T2)
     power = _get(CONF_P1_POWER)
     # Clamp: een entry kan een waarde buiten het schema-bereik bevatten
     # (handmatig bewerkte .storage, of een oudere grens dan de huidige).
@@ -486,8 +491,14 @@ def _maybe_start_p1_push(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # Een DSMR-telegram werkt alle entities in dezelfde tick bij; zonder
             # deze guard start elk van die events een eigen POST.
             return
-        c_total = _read_energy_kwh(consumption)
-        d_total = _read_energy_kwh(delivery)
+        # Meter zonder totaalstand: tarief 1 + tarief 2. Is er één van de
+        # twee onleesbaar, dan geen push (zie `sum_registers`).
+        c_total = sum_registers([
+            _read_energy_kwh(e) for e in (consumption, consumption_t2) if e
+        ])
+        d_total = sum_registers([
+            _read_energy_kwh(e) for e in (delivery, delivery_t2) if e
+        ])
         p_w = _read_power_w(power)
         if c_total is None or d_total is None or p_w is None:
             return  # essential fields missen; niets doorzetten
